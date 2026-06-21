@@ -1,9 +1,9 @@
 {
   "name": "agent-loop",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "private": true,
   "type": "module",
-  "description": "Local-first, evidence-driven autonomous coding loop (beta). The agent is a worker; objective runtime evidence is the source of truth.",
+  "description": "Local-first, evidence-driven autonomous coding loop (release candidate). The agent is a worker; objective runtime evidence is the source of truth.",
   "engines": {
     "node": ">=22.5.0"
   },
@@ -28,7 +28,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "node --no-warnings=ExperimentalWarning --import tsx bin/agent-loop.ts demo",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "verify:pack": "node scripts/verify-pack.mjs",
+    "release:check": "npm run check && npm run build && node dist/bin/agent-loop.js demo && npm audit --omit=dev --audit-level=high && npm run verify:pack"
   },
   "dependencies": {
     "yaml": "2.9.0",

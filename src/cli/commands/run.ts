@@ -7,7 +7,8 @@ import { createInterface } from 'node:readline';
 import { openSession, loadPlan, loadRunMeta, type Session, type RunMeta } from '../../orchestrator/session.js';
 import { createPlan } from '../../orchestrator/planning.js';
 import { RunEngine } from '../../orchestrator/run.js';
-import { IntakeError, PlanValidationError } from '../../domain/errors.js';
+import { acquireRunLock, releaseRunLock } from '../../process/pidfile.js';
+import { IntakeError, PlanValidationError, ControlError } from '../../domain/errors.js';
 import type { Plan } from '../../domain/schemas.js';
 import type { RunState } from '../../domain/states.js';
 import { runWatch } from '../../watch/dashboard.js';
@@ -75,6 +76,20 @@ export async function cmdRetry(args: ParsedArgs): Promise<number> {
 }
 
 async function executeRun(session: Session, plan: Plan, meta: RunMeta, args: ParsedArgs, resume: boolean): Promise<number> {
+  // Single-writer guard: refuse to start if another live orchestrator owns the
+  // lock; self-heal (take over) if the prior holder was hard-killed (stale lock).
+  const lock = acquireRunLock(session.paths.runLock, meta.runId, Date.now());
+  if (!lock.ok) {
+    throw new ControlError(
+      `another agent-loop run appears to be active for this project ` +
+        `(pid ${lock.holder.pid}, run ${lock.holder.runId}). If that process crashed, ` +
+        `remove ${session.paths.runLock} and retry.`,
+    );
+  }
+  if (lock.takeover === 'stale') {
+    process.stderr.write('recovered a stale run lock (a previous orchestrator did not exit cleanly)\n');
+  }
+
   // Graceful cancellation: SIGINT/SIGTERM abort the engine, which kills the active
   // child process groups and drives the run to a CANCELLED terminal state.
   const controller = new AbortController();
@@ -86,6 +101,9 @@ async function executeRun(session: Session, plan: Plan, meta: RunMeta, args: Par
       controller.abort();
     } else {
       // A second signal: hard exit (children already receive SIGTERM via abort).
+      // Intentionally do NOT release the lock — leaving it behind is what lets the
+      // next run detect it as stale (dead PID) and self-heal. Releasing here would
+      // defeat that recovery path (see process/pidfile.ts + docs/recovery.md).
       process.exit(130);
     }
   };
@@ -96,6 +114,7 @@ async function executeRun(session: Session, plan: Plan, meta: RunMeta, args: Par
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    releaseRunLock(session.paths.runLock);
   }
 }
 

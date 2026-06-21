@@ -9,7 +9,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { dirname } from 'node:path';
-import { ensureDir, appendLine } from '../util/fs.js';
+import { ensureDir, appendLine, chmodSafe, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from '../util/fs.js';
 import { EventStoreError } from '../domain/errors.js';
 import { newEventId } from '../domain/ids.js';
 import type { Clock } from '../util/clock.js';
@@ -98,12 +98,15 @@ export class SqliteEventStore implements EventStore {
   private readonly clock: Clock;
   private readonly jsonlMirrorPath: string | undefined;
   private readonly redactor: Redactor | undefined;
+  private readonly dbPath: string;
+  private sidecarsSecured = false;
 
   constructor(dbPath: string, opts: StoreOptions = {}) {
     this.clock = opts.clock ?? systemClock;
     this.jsonlMirrorPath = opts.jsonlMirrorPath;
     this.redactor = opts.redactor;
-    ensureDir(dirname(dbPath));
+    this.dbPath = dbPath;
+    ensureDir(dirname(dbPath), { mode: PRIVATE_DIR_MODE });
     try {
       this.db = new DatabaseSync(dbPath);
       this.db.exec('PRAGMA journal_mode = WAL;');
@@ -114,6 +117,18 @@ export class SqliteEventStore implements EventStore {
     } catch (err) {
       throw new EventStoreError(`failed to open event store at ${dbPath}`, { cause: err });
     }
+    // Keep the durable log + its WAL/SHM sidecars owner-only where the OS enforces
+    // POSIX modes; the parent dir is already 0700 (defense in depth). The migrate()
+    // writes above create the WAL/SHM, so they exist by now; `secureSidecars()` also
+    // re-applies after the first append in case a sidecar is (re)created lazily.
+    this.secureSidecars();
+  }
+
+  /** Enforce owner-only modes on the db file and its WAL/SHM sidecars (idempotent). */
+  private secureSidecars(): void {
+    chmodSafe(this.dbPath, PRIVATE_FILE_MODE);
+    chmodSafe(`${this.dbPath}-wal`, PRIVATE_FILE_MODE);
+    chmodSafe(`${this.dbPath}-shm`, PRIVATE_FILE_MODE);
   }
 
   private migrate(): void {
@@ -194,13 +209,19 @@ export class SqliteEventStore implements EventStore {
         });
         out.push(stored);
         if (this.jsonlMirrorPath) {
-          appendLine(this.jsonlMirrorPath, JSON.stringify(stored));
+          appendLine(this.jsonlMirrorPath, JSON.stringify(stored), { mode: PRIVATE_FILE_MODE });
         }
       }
       commit.run();
     } catch (err) {
       rollback.run();
       throw new EventStoreError('failed to append events', { cause: err });
+    }
+    // The first real write is what reliably materializes the WAL/SHM sidecars;
+    // re-apply owner-only modes so they are never left at the umask default.
+    if (!this.sidecarsSecured) {
+      this.sidecarsSecured = true;
+      this.secureSidecars();
     }
     return out;
   }

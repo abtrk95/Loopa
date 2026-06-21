@@ -104,9 +104,42 @@ engine reads it at checkpoints and via a poller:
 Because the watcher only ever *expresses intent* in this file and never edits run state,
 attaching/detaching a dashboard — even mid-run, even repeatedly — is always safe.
 
+## Single-writer run lock & hard-kill recovery
+
+`agent-loop run`/`retry` acquire a PID lock at `.agent-loop/control/run.pid`
+(`src/process/pidfile.ts`) so two orchestrators can't drive the same project at once:
+
+- If another **live** process holds the lock, the new run is refused with a clear
+  message (and where to find the lock).
+- If the lock was left by a **hard-killed** run (`kill -9`, power loss — the holder PID is
+  no longer alive), it is detected as **stale** and reclaimed automatically. A crash never
+  permanently bricks the project; the next `run`/`retry` recovers via this takeover plus
+  the git/event reconciliation above.
+- A corrupt lock file is treated as absent (self-heals).
+
+On a normal exit the lock is released. On a *second* `Ctrl-C` (hard exit) it is left
+behind on purpose — the next run detects it as stale.
+
+### Orphan / process-tree cleanup (honest OS limitations)
+
+- **POSIX (macOS/Linux):** children run in their own detached process group; timeouts,
+  cancellation (`SIGINT`/`SIGTERM` → engine abort → `pm.killAll()`), and server `stop()`
+  signal the **whole group**, reaping grandchildren too. Proven in
+  `test/integration/process-cleanup.test.ts` (a grandchild is killed when its parent times
+  out / the server is stopped).
+- **Windows:** there are no process groups; the tree is reaped best-effort with
+  `taskkill /T`. This is implemented and guarded but **not exercised in CI** (no Windows
+  host) — treat Windows process-tree reaping as best-effort.
+- **Hard kill of the orchestrator itself (`kill -9` of the agent-loop process):** no
+  cleanup code can run, so a detached child *may* briefly outlive it. The next run
+  self-heals the stale PID lock and `rollback()`/reconcile restore a clean state; a truly
+  orphaned child is the one residue and must be reaped by the OS / the user. This is an
+  inherent limitation of `SIGKILL`, stated plainly rather than hidden.
+
 ## Tests
 
 `test/integration/recovery-control.test.ts` proves: a blocked run resumes and
 re-attempts the blocked slice without redoing completed work; resuming an already
 completed run is an idempotent no-op; and pause/resume round-trips through the control
-plane.
+plane. `test/integration/process-cleanup.test.ts` proves stale-PID detection/takeover,
+live-holder refusal, and SIGINT/SIGTERM/timeout process-tree reaping.

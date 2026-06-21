@@ -36,18 +36,23 @@ roles:
   workers:
     - provider: fake
       weight: 1
-  # reviewer:          # optional; enables the advisory review pass
+  # reviewer:          # optional single reviewer; enables the advisory review pass
   #   provider: claude
   #   model: "<model-id>"
+  # reviewers:         # optional PANEL of DISTINCT reviewers for cross-model consensus
+  #   - { provider: claude, model: "<model-id>" }
+  #   - { provider: codex }
+  #   - { provider: opencode }
   fixer:
     strategy: same-as-worker   # or a full provider ref
-  # judge / browser:           # RESERVED — accepted but not yet wired (no effect)
+  # judge:                     # RESERVED — accepted but not yet wired (no effect)
 
 routing:
   workerStrategy: round-robin  # static | round-robin | weighted | capability
   fallbackOrder: []            # providers to try when a provider fails (implemented)
   switchProviderOnRetry: false # advance the worker pool on each retry (implemented)
-  reviewerConsensus: 1         # run N reviews of the configured reviewer; all must pass
+  reviewerConsensus: 1         # N reviews of the single `reviewer` (all must pass).
+                               # Ignored when roles.reviewers (a distinct panel) is set.
 
 execution:
   concurrency: 1               # parallel slices (via worktrees)
@@ -73,6 +78,19 @@ verification:
   detectTestWeakening: true
   detectSecrets: true
   flagBinary: true
+
+browser:                       # UI/browser verification (advisory; off by default)
+  enabled: false               # master switch
+  # startCommand: "npm run start"   # command that boots the app under test
+  baseUrl: "http://127.0.0.1:3000"
+  # readyPath: "/"             # probed for readiness (defaults to first route)
+  routes: ["/"]                # paths to navigate + capture
+  startupTimeoutMs: 30000
+  navigationTimeoutMs: 15000
+  failOnConsoleError: true     # a captured console/page error fails the route
+  required: false              # true → a browser failure BLOCKS the slice
+  engine: auto                 # auto (CDP/Chrome if found, else http) | cdp | http
+  # chromePath: "/path/to/chrome"   # for real screenshots + console capture via CDP
 
 riskPolicy:                    # plan-level safety (see schemas.ts: RiskPolicySchema)
   # globalForbiddenPaths, maxDiffLines, allowLockfileChanges, requireReviewAtOrAbove, ...
@@ -107,16 +125,39 @@ error, not a silently-ignored typo.
 Maps each role to a provider reference `{ provider, model?, weight, options }`.
 `workers` is a non-empty array (the pool the router draws from). `fixer` is either
 `{ strategy: same-as-worker }` or a full provider ref. `reviewer` is optional —
-omitting it disables the advisory review pass entirely.
+omitting it (and `reviewers`) disables the advisory review pass entirely.
 
-> **Reserved roles.** `judge` and `browser` are accepted by the schema but are
-> **not yet wired** into the orchestrator (the judge is never invoked; the browser
-> adapter is an experimental, unwired UI smoke-command runner with no real browser).
-> Setting them has no runtime effect today. See the Status section in the README.
+**Reviewer consensus.** Two modes:
+- `reviewer` + `routing.reviewerConsensus: N` → run the *same* reviewer N times; all
+  must pass (a single `blocked` is decisive).
+- `reviewers: [...]` (a panel) → run each **distinct** provider/model once
+  (cross-model consensus). The panel takes precedence over `reviewer` +
+  `reviewerConsensus`. In both modes a reviewer can only request a fixer pass or
+  block — it can **never** override the deterministic verifier.
+
+> **Reserved role.** `judge` is accepted by the schema but is **not yet wired** into
+> the orchestrator (it is never invoked; setting it has no runtime effect today).
+> Browser/UI verification IS implemented and wired — but it is configured under the
+> top-level `browser` section, not `roles.browser` (which remains reserved for a
+> future provider-driven browser). See the Status section in the README.
 
 ### `routing`
 Controls worker selection strategy, provider fallbacks, retry-switching, and reviewer
 consensus count. See [provider-adapters.md](provider-adapters.md#routing).
+
+### `browser`
+UI/browser verification (off by default). When `enabled`, after a slice passes the
+deterministic verifier the harness starts the app (`startCommand`), waits for
+`baseUrl` to serve, navigates each `route` capturing a screenshot + console errors,
+writes artifacts to `.agent-loop/artifacts/ui-smoke/`, and always tears the server
+down. With a Chrome/Chromium binary present (`engine: auto|cdp`) it captures **real
+PNG screenshots and real browser console errors** over the DevTools Protocol;
+otherwise (`engine: http`) it performs real HTTP navigation, saving HTML snapshots
+and flagging errors from HTTP status + an error sentinel. It is **advisory** unless
+`required: true`, and can never override the deterministic verifier (it runs only
+after a verifier pass). See [verification.md](verification.md#ui--browser-verification).
+Note: browser verification assumes a single fixed `baseUrl`, so use `concurrency: 1`
+(or per-slice ports) when enabling it alongside parallel slices.
 
 ### `execution`
 Concurrency, retry budget and backoff (deterministic: `backoff = base * 2^(attempt-1)`

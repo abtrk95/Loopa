@@ -14,7 +14,7 @@
  */
 import { isAbsolute, join, normalize, resolve, sep, dirname } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { atomicWrite } from '../util/fs.js';
+import { atomicWrite, PRIVATE_FILE_MODE } from '../util/fs.js';
 import type { GitRepo } from '../git/repo.js';
 import type { ProcessManager } from '../process/manager.js';
 import type { Redactor } from '../security/redact.js';
@@ -253,7 +253,7 @@ export async function verify(input: VerifyInput): Promise<VerificationResult> {
     }));
     const ok = evaluateExpect(spec.expect ?? 'exit_zero', res.exitCode, res.stdout, spec.contains);
     const logPath = join(input.checksDir, `${input.slice.id}__${spec.id}.log`);
-    atomicWrite(logPath, `$ ${argv.display}\n\n[stdout]\n${res.stdout}\n[stderr]\n${res.stderr}\n`);
+    atomicWrite(logPath, `$ ${argv.display}\n\n[stdout]\n${res.stdout}\n[stderr]\n${res.stderr}\n`, { mode: PRIVATE_FILE_MODE });
     const summary = ok ? `passed (exit ${res.exitCode})` : `failed (exit ${res.exitCode})`;
     input.onCheckOutput?.({ id: spec.id, summary });
     record({ id: spec.id, command: argv.display, kind: 'command', ok, exitCode: res.exitCode, durationMs: res.durationMs, summary });

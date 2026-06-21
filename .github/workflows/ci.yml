@@ -33,6 +33,8 @@ jobs:
         run: node dist/bin/agent-loop.js demo
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
+      - name: Package contents (npm pack dry-run validation)
+        run: npm run verify:pack
 
   # Windows is NOT a supported platform yet (shell-free spawn cannot launch .cmd/.bat
   # provider/git shims; POSIX process groups differ). This job is informational only

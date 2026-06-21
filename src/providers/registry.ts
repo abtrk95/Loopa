@@ -44,6 +44,7 @@ export function referencedProviderIds(config: Config): string[] {
   ids.add(config.roles.planner.provider);
   for (const w of config.roles.workers) ids.add(w.provider);
   if (config.roles.reviewer) ids.add(config.roles.reviewer.provider);
+  for (const r of config.roles.reviewers) ids.add(r.provider);
   if (config.roles.judge) ids.add(config.roles.judge.provider);
   if (config.roles.browser) ids.add(config.roles.browser.provider);
   const fp = fixerProvider(config.roles.fixer);

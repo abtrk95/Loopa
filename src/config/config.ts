@@ -7,7 +7,7 @@
  *   built-in defaults → user config → project config → env → CLI overrides.
  */
 import { z } from 'zod';
-import { RiskPolicySchema, CheckSpecSchema } from '../domain/schemas.js';
+import { RiskPolicySchema, CheckSpecSchema, CommandSpecSchema } from '../domain/schemas.js';
 
 export const CONFIG_VERSION = 1 as const;
 
@@ -33,11 +33,18 @@ export const RolesSchema = z
   .object({
     planner: ProviderRefSchema.default({ provider: 'fake' }),
     workers: z.array(ProviderRefSchema).min(1).default([{ provider: 'fake', weight: 1, options: {} }]),
+    /** Single reviewer. For multi-reviewer consensus across DISTINCT providers,
+     * use `reviewers` (below); `reviewer` remains the fallback/legacy single role. */
     reviewer: ProviderRefSchema.optional(),
+    /** A panel of DISTINCT reviewers. When non-empty, consensus runs each of these
+     * once (independent provider+model per vote) instead of re-sampling one reviewer.
+     * Takes precedence over `reviewer` + `routing.reviewerConsensus`. */
+    reviewers: z.array(ProviderRefSchema).default([]),
     fixer: FixerRefSchema.default({ strategy: 'same-as-worker' }),
     /** RESERVED / EXPERIMENTAL: accepted but not yet invoked by the orchestrator. */
     judge: ProviderRefSchema.optional(),
-    /** RESERVED / EXPERIMENTAL: the UI smoke adapter is not yet wired (see verify/browser.ts). */
+    /** RESERVED: a future provider-driven browser role. The wired UI/browser
+     * verification is configured under the top-level `browser` section, not here. */
     browser: ProviderRefSchema.optional(),
   })
   .strict();
@@ -99,6 +106,35 @@ export const VerificationConfigSchema = z
   .strict();
 export type VerificationConfig = z.infer<typeof VerificationConfigSchema>;
 
+export const BrowserConfigSchema = z
+  .object({
+    /** Master switch. Off by default — zero behaviour change for existing runs. */
+    enabled: z.boolean().default(false),
+    /** Command that starts the app under test as a long-running server. */
+    startCommand: CommandSpecSchema.optional(),
+    /** Base URL probed for readiness and used to resolve `routes`. */
+    baseUrl: z.string().url().default('http://127.0.0.1:3000'),
+    /** Path used for the readiness probe (defaults to the first route / '/'). */
+    readyPath: z.string().optional(),
+    /** Route paths to navigate, capture, and scan for console errors. */
+    routes: z.array(z.string()).default(['/']),
+    /** ms to wait for the app to begin serving `baseUrl`. */
+    startupTimeoutMs: z.number().int().positive().default(30_000),
+    /** ms budget per route navigation. */
+    navigationTimeoutMs: z.number().int().positive().default(15_000),
+    /** Treat any captured console error / page error as a failure. */
+    failOnConsoleError: z.boolean().default(true),
+    /** When true a browser failure BLOCKS the slice; otherwise it is advisory
+     * (recorded as a flag, never overriding the deterministic verifier). */
+    required: z.boolean().default(false),
+    /** Engine: 'auto' uses CDP/Chrome when a binary is found, else the HTTP probe. */
+    engine: z.enum(['auto', 'cdp', 'http']).default('auto'),
+    /** Explicit Chrome/Chromium binary for real (CDP) screenshots + console capture. */
+    chromePath: z.string().optional(),
+  })
+  .strict();
+export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
+
 export const TuiConfigSchema = z
   .object({
     color: z.boolean().default(true),
@@ -135,6 +171,7 @@ export const ConfigSchema = z
     execution: ExecutionSchema.default({}),
     git: GitConfigSchema.default({}),
     verification: VerificationConfigSchema.default({}),
+    browser: BrowserConfigSchema.default({}),
     riskPolicy: RiskPolicySchema.default({}),
     tui: TuiConfigSchema.default({}),
     github: GithubConfigSchema.default({}),

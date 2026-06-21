@@ -128,8 +128,13 @@ See [security-model.md](security-model.md) for the rationale.
 The `Router` (`routing.ts`) maps roles → provider+model per slice/attempt, pure over
 config plus an optional capability predicate:
 
-- **planner / reviewer** — taken from their configured role refs. (`judge` is reserved
-  and not yet invoked.)
+- **planner** — taken from its configured role ref. (`judge` is reserved and not yet
+  invoked.)
+- **reviewer(s)** — either the single `roles.reviewer` (run `routing.reviewerConsensus`
+  times for consensus), or `roles.reviewers` — a panel of **distinct** provider+model
+  refs, each run once for cross-model consensus. The panel takes precedence. All votes
+  must pass; one `blocked` is decisive. Reviewers are advisory and can never override the
+  deterministic verifier.
 - **worker** — chosen from `roles.workers` by `routing.workerStrategy`:
   - `static` — always the first capable worker.
   - `round-robin` — cycle through capable workers (default).
@@ -166,3 +171,38 @@ preset CLIs, or a one-file change for a brand-new adapter.
    `ProviderAdapter` in a new file under `src/providers/`, register it in
    `registry.ts`, and declare its capabilities. Nothing in `orchestrator/`,
    `verify/`, or `events/` needs to change — the contract is the seam.
+
+## Real-provider smoke tests
+
+`test/integration/provider-smoke.test.ts` proves provider wiring at two levels.
+
+**Hermetic (always on, no credentials).** An argv-recording stub stands in for each CLI
+and asserts the *exact* command + model-flag construction and prompt-delivery convention
+for every preset, plus that **no permission-bypass flags** are ever added by default:
+
+| Provider | argv (for model `M`) | prompt delivery |
+| --- | --- | --- |
+| `claude` | `-p --model M` | stdin |
+| `codex` | `exec -m M <pack>` | arg |
+| `opencode` | `run -m M <pack>` | arg |
+
+**Opt-in (real CLIs).** These run only when you set the matching env var, and only do
+safe `--version`/health probes (no tokens spent). The CLI must be installed **and on the
+`PATH` the test process inherits**:
+
+```bash
+AGENT_LOOP_SMOKE_CLAUDE=1   npm test -- provider-smoke   # claude --version + health
+AGENT_LOOP_SMOKE_CODEX=1    npm test -- provider-smoke   # codex  --version + health
+AGENT_LOOP_SMOKE_OPENCODE=1 npm test -- provider-smoke   # opencode --version + health
+```
+
+**Opt-in live coding smoke (SPENDS REAL TOKENS, double-gated).** Drives a real session
+against a throwaway repo and asserts the provider was actually spawned and the run
+terminated (success is not asserted — a real model may or may not satisfy the slice):
+
+```bash
+AGENT_LOOP_SMOKE_LIVE=1 AGENT_LOOP_SMOKE_LIVE_PROVIDER=claude npm test -- provider-smoke
+```
+
+Set `chromePath`/`AGENT_LOOP_CHROME` is unrelated to providers — that's for browser
+verification (see [verification.md](verification.md)).

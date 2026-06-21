@@ -74,16 +74,32 @@ export class Router {
     return capable.length ? capable : base;
   }
 
+  /**
+   * The reviewer for consensus vote `index`.
+   *  - If `roles.reviewers` (a panel) is set, each index maps to a DISTINCT
+   *    provider+model (panel[index]); the last entry is reused if index overflows.
+   *  - Otherwise the single `roles.reviewer` is returned for every index (N
+   *    independent samples of one reviewer).
+   */
   reviewer(index = 0): Selection | undefined {
+    const panel = this.config.roles.reviewers;
+    if (panel.length > 0) {
+      const ref = panel[index] ?? panel[panel.length - 1];
+      return ref ? toSelection(ref) : undefined;
+    }
     const r = this.config.roles.reviewer;
-    if (!r) return undefined;
-    // For consensus >1 we currently reuse the configured reviewer; distinct
-    // reviewers can be modelled by capability-aware fallbacks in future.
-    void index;
-    return toSelection(r);
+    return r ? toSelection(r) : undefined;
   }
 
+  /**
+   * How many reviews a consensus pass runs.
+   *  - A distinct `roles.reviewers` panel → one vote per panel member.
+   *  - A single `roles.reviewer` → `routing.reviewerConsensus` repeated samples.
+   *  - No reviewer configured → 0 (review is skipped).
+   */
   reviewerConsensusCount(): number {
+    const panel = this.config.roles.reviewers;
+    if (panel.length > 0) return panel.length;
     return this.config.roles.reviewer ? this.config.routing.reviewerConsensus : 0;
   }
 

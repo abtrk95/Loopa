@@ -7,7 +7,7 @@
  */
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { atomicWriteJson, readJson } from '../util/fs.js';
+import { atomicWriteJson, readJson, PRIVATE_FILE_MODE } from '../util/fs.js';
 
 export type DesiredState = 'run' | 'paused' | 'stopped';
 
@@ -33,7 +33,7 @@ export class ControlPlane {
   }
 
   private set(desired: DesiredState, nowMs: number): void {
-    atomicWriteJson(this.file, { desired, ts: nowMs } satisfies ControlFile);
+    atomicWriteJson(this.file, { desired, ts: nowMs } satisfies ControlFile, { mode: PRIVATE_FILE_MODE });
   }
 
   requestPause(nowMs: number): void {

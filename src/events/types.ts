@@ -49,6 +49,9 @@ export const EVENT_TYPES = [
   // review
   'REVIEW_STARTED',
   'REVIEW_FINISHED',
+  // browser / UI verification (advisory; never overrides the deterministic verifier)
+  'BROWSER_VERIFICATION_STARTED',
+  'BROWSER_VERIFICATION_FINISHED',
   // slice terminal
   'SLICE_COMPLETED',
   'SLICE_RETRY_SCHEDULED',
@@ -75,6 +78,7 @@ export const EVENT_SOURCES = [
   'process',
   'verifier',
   'reviewer',
+  'browser',
   'control',
   'github',
 ] as const;

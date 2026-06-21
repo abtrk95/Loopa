@@ -67,6 +67,36 @@ A `BLOCKED` run means at least one slice hit a hard violation or exhausted its r
 5. `agent-loop retry` — clears the block and re-attempts only unfinished work; completed
    slices are never redone. See [recovery.md](recovery.md).
 
+## When a run won't start ("another run appears active")
+
+`run`/`retry` take a single-writer lock at `.agent-loop/control/run.pid`. If a previous
+orchestrator was **hard-killed** (`kill -9`, power loss), the lock is detected as stale
+(its PID is dead) and reclaimed automatically — just re-run. You only see *"another
+agent-loop run appears to be active (pid N)"* when a process with that PID is genuinely
+still alive. If you're certain it isn't yours, remove `.agent-loop/control/run.pid` and
+retry. (A second `Ctrl-C` on a live run hard-exits and intentionally leaves the lock for
+the next run to reclaim.) See [recovery.md](recovery.md).
+
+## UI / browser verification
+
+For frontend slices, enable `browser` in config to start the app, navigate routes, and
+capture screenshots + console errors after the deterministic verifier passes:
+
+```yaml
+browser:
+  enabled: true
+  startCommand: "npm run start"
+  baseUrl: "http://127.0.0.1:3000"
+  routes: ["/", "/dashboard"]
+  required: false          # advisory; set true to block a slice on UI failure
+```
+
+With Chrome/Chromium installed you get real PNG screenshots + real console-error capture
+(CDP); otherwise it falls back to HTTP navigation with HTML snapshots. Artifacts land in
+`.agent-loop/artifacts/ui-smoke/`. Browser verification is advisory and can never override
+the deterministic verifier. Use `concurrency: 1` when it's enabled (the harness binds a
+single `baseUrl`). See [verification.md](verification.md#ui--browser-verification).
+
 ## Tuning for throughput vs. caution
 
 | Goal | Knobs |
@@ -75,6 +105,8 @@ A `BLOCKED` run means at least one slice hit a hard violation or exhausted its r
 | More retries before blocking | `execution.maxRetriesPerSlice` |
 | Tighter/looser slice size | `verification.maxDiffLines`, `riskPolicy.maxDiffLines` |
 | Mandatory human-grade review on risky slices | configure `roles.reviewer` + `riskPolicy.requireReviewAtOrAbove` |
+| Cross-model review consensus | `roles.reviewers: [...]` (distinct providers, each votes once) |
+| UI/browser verification on frontend slices | `browser.enabled: true` (+ `startCommand`, `baseUrl`, `routes`); `browser.required: true` to block on failure |
 | Cap spend | `execution.budgetUsd` / `execution.budgetTokens` (0 = unlimited) |
 | Cross-provider fallback | `routing.fallbackOrder`, `routing.switchProviderOnRetry` |
 

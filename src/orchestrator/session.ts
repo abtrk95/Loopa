@@ -7,7 +7,7 @@ import { ZodError } from 'zod';
 import { statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectPaths, ensureLayout, type ProjectPaths } from '../util/paths.js';
-import { atomicWriteJson, atomicWrite, readJson, fileExists } from '../util/fs.js';
+import { atomicWriteJson, atomicWrite, readJson, fileExists, PRIVATE_FILE_MODE } from '../util/fs.js';
 import { Logger } from '../util/logger.js';
 import { Redactor } from '../security/redact.js';
 import { collectSecretValues } from '../security/env.js';
@@ -147,7 +147,7 @@ export interface RunMeta {
 }
 
 export function saveRunMeta(paths: ProjectPaths, meta: RunMeta): void {
-  atomicWriteJson(paths.stateDir + '/run.json', meta);
+  atomicWriteJson(paths.stateDir + '/run.json', meta, { mode: PRIVATE_FILE_MODE });
 }
 
 export function loadRunMeta(paths: ProjectPaths): RunMeta | undefined {

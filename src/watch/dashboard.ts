@@ -9,6 +9,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { SqliteEventStore } from '../events/store.js';
 import { ProcessManager } from '../process/manager.js';
 import { GitRepo } from '../git/repo.js';
+import { Redactor } from '../security/redact.js';
+import { collectSecretValues } from '../security/env.js';
 import { projectPaths } from '../util/paths.js';
 import { loadRunMeta } from '../orchestrator/session.js';
 import { ControlPlane } from '../orchestrator/control.js';
@@ -70,9 +72,12 @@ export async function runWatch(opts: WatchOptions): Promise<number> {
     out.write('No event store found for this project yet.\n');
     return 1;
   }
+  // The watcher reads live git (last commit message, the `g` diff view). Route it
+  // through a redactor so no secret reaches the dashboard even from untracked diffs.
+  const redactor = new Redactor(collectSecretValues(process.env));
   const ctx: WatchCtx = {
     store: new SqliteEventStore(paths.eventsDb),
-    git: new GitRepo(opts.root, new ProcessManager()),
+    git: new GitRepo(opts.root, new ProcessManager(), redactor),
     runId,
     control: new ControlPlane(paths.controlDir),
     logPath: paths.logsDir + '/agent-loop.log',

@@ -10,7 +10,7 @@
  * bounded fixer retry, only a 'pass' (plus review, if required) leads to a commit.
  */
 import { join } from 'node:path';
-import { atomicWrite } from '../util/fs.js';
+import { atomicWrite, PRIVATE_FILE_MODE } from '../util/fs.js';
 import type { NewEvent } from '../events/types.js';
 import type { Config } from '../config/config.js';
 import type { Plan, Slice, Risk } from '../domain/schemas.js';
@@ -27,6 +27,7 @@ import { assertSliceTransition, type SliceState } from '../domain/states.js';
 import { newAttemptId } from '../domain/ids.js';
 import { buildContextPack, type DependencyResult, type PreviousFailure } from './context.js';
 import { verify, verifyCommitSafety, type VerificationResult } from '../verify/verifier.js';
+import { runBrowserVerification } from '../verify/browser.js';
 import type { ProviderResult } from '../providers/types.js';
 import { runReview } from '../review/reviewer.js';
 import { maxAttempts, canRetry, backoffDelayMs, sleep } from './retry.js';
@@ -106,7 +107,7 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
       maxBytes: ctx.config.execution.maxOutputBytes,
       redactor: ctx.redactor,
     });
-    atomicWrite(join(ctx.paths.contextDir, `${slice.id}__a${attempt}.md`), pack);
+    atomicWrite(join(ctx.paths.contextDir, `${slice.id}__a${attempt}.md`), pack, { mode: PRIVATE_FILE_MODE });
 
     ctx.emit({ type: 'SLICE_STARTED', source: 'orchestrator', sliceId: slice.id, attemptId, payload: { title: slice.title, attempt } });
     transition('EXECUTING');
@@ -200,6 +201,13 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
       }
       // Review is advisory for this risk level → proceed with a recorded flag.
       ctx.logger.warn(`proceeding past advisory review for ${slice.id}`, { sliceId: slice.id });
+    }
+
+    // --- optional UI/browser verification (advisory; never overrides verifier) ---
+    const browser = await maybeBrowserVerify(ctx, slice, workRepo, attemptId);
+    if (browser === 'blocked') {
+      await workRepo.rollback();
+      return blockSlice(ctx, slice, transition, 'required browser verification failed', [], attempt);
     }
 
     // --- scoped commit (idempotent) ---
@@ -366,13 +374,57 @@ async function maybeReview(
       source: 'reviewer',
       sliceId: slice.id,
       attemptId,
-      payload: { verdict: outcome.verdict.verdict, malformed: outcome.malformed, findings: outcome.verdict.findings.length, index: i, of: count },
+      payload: { provider: rsel.provider, model: rsel.model ?? null, verdict: outcome.verdict.verdict, malformed: outcome.malformed, findings: outcome.verdict.findings.length, index: i, of: count },
     });
     verdicts.push(outcome.verdict.verdict);
     if (outcome.verdict.verdict === 'blocked') break;
   }
   if (verdicts.includes('blocked')) return 'blocked';
   if (verdicts.includes('changes_requested')) return 'changes_requested';
+  return 'pass';
+}
+
+/**
+ * Optional UI/browser verification. Runs only after the deterministic verifier has
+ * already passed (so it can never override a fail/block). Advisory by default: a
+ * failure is recorded and the slice proceeds. With `browser.required = true` a
+ * failure blocks the slice.
+ */
+async function maybeBrowserVerify(
+  ctx: ExecContext,
+  slice: Slice,
+  workRepo: GitRepo,
+  attemptId: string,
+): Promise<'pass' | 'blocked'> {
+  if (!ctx.config.browser.enabled) return 'pass';
+  ctx.emit({ type: 'BROWSER_VERIFICATION_STARTED', source: 'browser', sliceId: slice.id, attemptId, payload: { routes: ctx.config.browser.routes.length } });
+  const result = await runBrowserVerification({
+    config: ctx.config.browser,
+    cwd: workRepo.dir,
+    uiSmokeDir: ctx.paths.uiSmokeDir,
+    sliceId: slice.id,
+    pm: ctx.pm,
+    redactor: ctx.redactor,
+    signal: ctx.signal,
+  }).catch((err: unknown) => ({
+    ran: true,
+    ok: false,
+    engine: 'none' as const,
+    summary: `browser verification crashed: ${(err as Error).message}`,
+    routes: [],
+    artifacts: [],
+  }));
+  ctx.emit({
+    type: 'BROWSER_VERIFICATION_FINISHED',
+    source: 'browser',
+    sliceId: slice.id,
+    attemptId,
+    payload: { ok: result.ok, ran: result.ran, engine: result.engine, summary: result.summary, routes: result.routes.length, required: ctx.config.browser.required },
+  });
+  if (result.ran && !result.ok) {
+    if (ctx.config.browser.required) return 'blocked';
+    ctx.logger.warn(`advisory browser verification failed for ${slice.id}: ${result.summary}`, { sliceId: slice.id });
+  }
   return 'pass';
 }
 
@@ -424,7 +476,7 @@ function writeBlockerReport(ctx: ExecContext, slice: Slice, reason: string, deta
     `fix the blocker manually and run \`agent-loop retry\`, or adjust the plan/scope.`,
     ``,
   ].join('\n');
-  atomicWrite(join(ctx.paths.reportsDir, `blocked-${slice.id}.md`), ctx.redactor.redact(md));
+  atomicWrite(join(ctx.paths.reportsDir, `blocked-${slice.id}.md`), ctx.redactor.redact(md), { mode: PRIVATE_FILE_MODE });
 }
 
 function findingDetails(v: VerificationResult): string[] {

@@ -3,7 +3,7 @@
  * touches a file or the terminal. Loggers carry correlation context (run, slice,
  * attempt, component) that is attached to each record.
  */
-import { appendLine } from './fs.js';
+import { appendLine, PRIVATE_FILE_MODE } from './fs.js';
 import { Redactor } from '../security/redact.js';
 import type { Clock } from './clock.js';
 import { systemClock } from './clock.js';
@@ -87,7 +87,7 @@ export class Logger {
     const line = this.redactor.redact(JSON.stringify(record));
     if (this.filePath) {
       try {
-        appendLine(this.filePath, line);
+        appendLine(this.filePath, line, { mode: PRIVATE_FILE_MODE });
       } catch {
         // Logging must never crash the engine. A failed log write is non-fatal.
       }

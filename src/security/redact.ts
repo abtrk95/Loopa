@@ -15,11 +15,16 @@ export const REDACTION_PLACEHOLDER = '***REDACTED***';
 const SECRET_PATTERNS: readonly RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, // OpenAI / Anthropic style
+  /sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}/g, // Anthropic API key (explicit)
+  /(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}/g, // Stripe secret/restricted/publishable
   /ghp_[A-Za-z0-9]{20,}/g, // GitHub PAT (classic)
   /gh[osur]_[A-Za-z0-9]{20,}/g, // GitHub other tokens
   /github_pat_[A-Za-z0-9_]{20,}/g, // GitHub fine-grained PAT
+  /glpat-[A-Za-z0-9_-]{20,}/g, // GitLab PAT
+  /npm_[A-Za-z0-9]{30,}/g, // npm automation token
   /xox[baprs]-[A-Za-z0-9-]{10,}/g, // Slack
   /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /ASIA[0-9A-Z]{16}/g, // AWS temporary access key id
   /AIza[0-9A-Za-z_-]{20,}/g, // Google API key
   /\bBearer\s+[A-Za-z0-9._-]{16,}/g, // Authorization: Bearer ...
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT

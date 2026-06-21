@@ -130,16 +130,46 @@ human reads to decide whether to fix-and-`retry` or adjust the plan. The reason 
 always grounded in evidence (a failing check, an out-of-scope path, a detected secret),
 never in agent narration.
 
-## UI / browser verification (experimental, not wired)
+## UI / browser verification (implemented; advisory)
 
-There is **no real browser verification** today. `src/verify/browser.ts` defines an
-interface and a command-based adapter that would run a user-configured smoke/e2e command
-(e.g. `npm run e2e`) and save its **text** output under `.agent-loop/artifacts/ui-smoke/`
-— it captures no screenshots, console errors, or accessibility results, and it is **not
-invoked** by the verifier or executor in this release. The `browser` role exists in the
-schema as a reserved placeholder. Treat UI verification as a planned extension; do not
-rely on it. When wired, it would be an additional advisory check that can never override
-a deterministic verifier failure.
+Browser/UI verification is **implemented and wired** (off by default — enable it under
+the `browser` config section). After a slice passes the deterministic verifier, the
+harness (`src/verify/browser.ts`):
+
+1. **starts the app** under test as a server (`browser.startCommand`),
+2. **waits** (with `startupTimeoutMs`) until `browser.baseUrl` accepts connections,
+3. **navigates** each `browser.routes` entry, capturing a **screenshot** and any
+   **console / page errors**,
+4. **writes artifacts** to `.agent-loop/artifacts/ui-smoke/` (a `.png` or `.html`
+   snapshot per route + a `<slice>__browser.json` summary), and
+5. **always tears down** the app server tree and the browser engine — including on
+   timeout, abort, or error (timeout cleanup).
+
+Two engines implement the same contract:
+
+- **`CdpBrowserEngine`** — a real headless **Chrome/Chromium** driven over the DevTools
+  Protocol (zero npm deps; uses Node's built-in `WebSocket`/`fetch`). Produces **real
+  PNG screenshots** and captures **real browser console errors / uncaught exceptions**.
+  Selected automatically when a Chrome binary is found (`engine: auto`) or forced with
+  `engine: cdp` (+ `chromePath`).
+- **`HttpBrowserEngine`** — a zero-dependency fallback that performs real HTTP
+  navigation against the running app, saves the served HTML as the route snapshot, and
+  flags page errors from the HTTP status and an error sentinel. Selected when no Chrome
+  is available, or forced with `engine: http`.
+
+Browser verification is **advisory** by default: a failure is recorded
+(`BROWSER_VERIFICATION_FINISHED` event + artifacts) and the slice proceeds. With
+`browser.required: true`, a browser failure **blocks** the slice. In neither case can it
+override the deterministic verifier — it runs **only after** a verifier `pass`, so it can
+never turn a `fail`/`block` into success.
+
+> **Reserved.** `roles.browser` (a provider ref) remains reserved for a future
+> provider-driven browser and is distinct from the wired `browser` config section. The
+> `judge` role is still reserved/unimplemented.
+
+Tested by `test/integration/browser-verify.test.ts` against a fixture HTTP app
+(startup, navigation, capture, console-error detection, timeout cleanup, lifecycle
+gating) plus an opt-in real-Chrome (CDP) check.
 
 ## Testing the verifier
 

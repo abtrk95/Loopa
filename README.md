@@ -121,27 +121,57 @@ projections of it.
 
 ## Status & known limitations
 
-agent-loop is **beta**. The deterministic core — evidence-based completion, the SQLite
-event log, scoped/verified commits, safe parallel worktrees, the read-only dashboard,
-shell-free process execution, and the safety scanner — is implemented and tested
-(`npm run check`). The following are **not yet implemented / not wired**, and should not
-be relied on:
+agent-loop is a **release candidate** (`0.2.0-rc`). It is **not** marketed as
+"production-ready" in the unqualified sense — but the deterministic core and the
+operational/safety hardening below are implemented, tested, and honestly bounded.
 
-- **`judge` role** — accepted in config but never invoked by the orchestrator (reserved).
-- **Browser/UI verification** — there is **no real browser** (no Playwright, screenshots,
-  console, or accessibility checks). `src/verify/browser.ts` is an experimental,
-  *unwired* command-smoke adapter (see [docs/verification.md](docs/verification.md)).
-- **Platform support is macOS/Linux only.** Windows is untested and currently broken
-  (shell-free spawning cannot launch `.cmd`/`.bat` provider/git shims; POSIX process
-  groups differ). CI covers Linux + macOS; a Windows job runs non-blocking.
+**Implemented and tested** (`npm run check`):
+
+- Evidence-based completion, the append-only SQLite event log, scoped/verified commits
+  (incl. agent-self-commit and resume-bypass protection), safe parallel worktrees, the
+  read-only dashboard, shell-free process execution, and the deterministic safety scanner.
+- **Provider fallback**, **switch-on-retry**, and **reviewer consensus** — including a
+  panel of **distinct** reviewer providers/models (`roles.reviewers`) for cross-model
+  consensus. A reviewer can never override the deterministic verifier.
+- **Browser/UI verification** (`browser.*`, off by default): starts the app, navigates
+  routes, captures screenshots + console errors, and cleans up. Real Chrome via the
+  DevTools Protocol when available (real PNG screenshots + console capture), with a
+  zero-dependency HTTP fallback. Advisory unless `browser.required: true`; it runs only
+  after a verifier pass, so it can never override it. See
+  [docs/verification.md](docs/verification.md).
+- **Process cleanup hardening**: single-writer run lock with stale-PID (`kill -9`)
+  recovery, process-group/tree reaping (POSIX groups; Windows `taskkill /T` best-effort),
+  and SIGINT/SIGTERM/timeout coverage. See [docs/recovery.md](docs/recovery.md).
+- **Artifact privacy**: the `.agent-loop/` tree is created owner-only (`0700` dirs /
+  `0600` sensitive files) where the OS enforces POSIX modes, and secrets are redacted
+  before they reach logs, events, reports, context packs, and the dashboard. Tests assert
+  no secret persists in SQLite, JSON, logs, reports, or TUI snapshots.
+- **Real-provider smoke harness** (`test/integration/provider-smoke.test.ts`): hermetic
+  argv stubs prove command/model construction for claude/codex/opencode; opt-in env-gated
+  tests probe the real CLIs. See [docs/provider-adapters.md](docs/provider-adapters.md).
+- **GitHub live-safe validation**: hermetic `gh`-stub tests prove draft-by-default, push
+  only with `--push`, dedupe, and **no auto-merge/auto-deploy path**; an optional live
+  test runs against a throwaway repo. See [docs/github-integration.md](docs/github-integration.md).
+
+**Known limitations (honest):**
+
+- **`judge` role** — accepted in config but **reserved/not wired** (never invoked). So is
+  `roles.browser` (a future provider-driven browser role); the *wired* browser feature is
+  the top-level `browser` config section.
+- **Platform support is macOS/Linux.** Windows is **untested and unsupported** (shell-free
+  spawn cannot launch `.cmd`/`.bat` shims; `taskkill`-based tree reaping is implemented
+  but unexercised in CI). CI gates on Linux + macOS; a Windows job runs non-blocking.
+- **Real multi-provider runs are proven hermetically, not at scale.** Live paid
+  `claude`/`codex`/`opencode` runs are opt-in and not in CI.
+- **Browser verification with `concurrency > 1`** assumes per-slice ports (the harness
+  binds one `baseUrl`); use `concurrency: 1` when enabling it.
 - **Threat model.** agent-loop verifies what *it* commits and rejects agent self-commits
   and unverified trailer commits on resume. A human with direct write access to the
   repository/git history is outside the threat model.
+- **Packaging.** `private: true`, no LICENSE yet — not published to npm.
 
-Provider **fallback**, **switch-on-retry**, and **reviewer consensus** *are* implemented
-and exercised by tests as of this release.
-
-A full evidence-based assessment is in
+Release process and gates: [docs/release-checklist.md](docs/release-checklist.md). A full
+evidence-based assessment is in
 [docs/production-readiness-audit.md](docs/production-readiness-audit.md).
 
 ## Documentation
@@ -159,6 +189,7 @@ A full evidence-based assessment is in
 - [docs/operations.md](docs/operations.md) — day-to-day operating playbook.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common failures and fixes.
 - [docs/reference-analysis.md](docs/reference-analysis.md) — what we learned from prior art.
+- [docs/release-checklist.md](docs/release-checklist.md) — release gates + the RC sign-off.
 - [docs/adr/0001-implementation-stack.md](docs/adr/0001-implementation-stack.md) — stack decisions.
 
 ## Requirements

@@ -4,7 +4,7 @@
  * platforms.
  */
 import { join } from 'node:path';
-import { atomicWrite, ensureDir, fileExists } from './fs.js';
+import { atomicWrite, ensureDir, fileExists, PRIVATE_DIR_MODE } from './fs.js';
 
 export const AGENT_DIR = '.agent-loop';
 
@@ -29,6 +29,8 @@ export interface ProjectPaths {
   readonly worktreesDir: string;
   readonly reportsDir: string;
   readonly controlDir: string;
+  /** Single-writer run lock (PID file) — see process/pidfile.ts. */
+  readonly runLock: string;
 }
 
 export function projectPaths(root: string): ProjectPaths {
@@ -55,10 +57,16 @@ export function projectPaths(root: string): ProjectPaths {
     worktreesDir: join(dir, 'worktrees'),
     reportsDir: join(dir, 'reports'),
     controlDir: join(dir, 'control'),
+    runLock: join(dir, 'control', 'run.pid'),
   };
 }
 
-/** Create the full directory tree and write the protective inner .gitignore. */
+/** Create the full directory tree and write the protective inner .gitignore.
+ *
+ * Every directory is created owner-only (0700) where the OS enforces POSIX
+ * permissions, so run state (events, logs, context packs, reports, control
+ * intent) is not world-readable on a shared host. On Windows the mode is a no-op
+ * (documented in docs/security-model.md). */
 export function ensureLayout(paths: ProjectPaths): void {
   for (const d of [
     paths.dir,
@@ -74,7 +82,7 @@ export function ensureLayout(paths: ProjectPaths): void {
     paths.reportsDir,
     paths.controlDir,
   ]) {
-    ensureDir(d);
+    ensureDir(d, { mode: PRIVATE_DIR_MODE });
   }
   const gi = join(paths.dir, '.gitignore');
   if (!fileExists(gi)) {

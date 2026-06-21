@@ -4,7 +4,7 @@
  * what was objectively verified.
  */
 import { join } from 'node:path';
-import { atomicWrite, atomicWriteJson } from '../util/fs.js';
+import { atomicWrite, atomicWriteJson, PRIVATE_FILE_MODE } from '../util/fs.js';
 import type { Session } from './session.js';
 import type { Plan } from '../domain/schemas.js';
 import { progressPercent, type RunSnapshot } from '../events/projection.js';
@@ -51,7 +51,7 @@ export function generateReport(session: Session, plan: Plan, snap: RunSnapshot):
 
   const md = session.redactor.redact(lines.join('\n') + '\n');
   const reportPath = join(session.paths.reportsDir, 'report.md');
-  atomicWrite(reportPath, md);
+  atomicWrite(reportPath, md, { mode: PRIVATE_FILE_MODE });
   atomicWriteJson(join(session.paths.reportsDir, 'report.json'), {
     runId: snap.runId,
     state: snap.runState,
@@ -65,6 +65,6 @@ export function generateReport(session: Session, plan: Plan, snap: RunSnapshot):
     assumptions: snap.assumptions,
     costUsd: snap.costUsd,
     tokens: snap.tokens,
-  });
+  }, { mode: PRIVATE_FILE_MODE });
   return reportPath;
 }

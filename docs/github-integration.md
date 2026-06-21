@@ -72,6 +72,28 @@ A `PR_CREATED` event (`{ url, created }`) records the action in the log.
 This is part of the security posture: outward, hard-to-reverse actions require explicit
 human intent. See [security-model.md](security-model.md#defense-7--explicit-outward-actions-only).
 
+## Tests
+
+**Hermetic (always on).** `test/integration/github-pr.test.ts` runs the full PR + issue
+surface against a `gh` stub on `PATH` (and a real local bare remote for the push path) and
+asserts: duplicate-PR prevention, draft-by-default + `--no-draft`, push **only** with
+`--push`, read-only issue import, and — crucially — that **no `gh pr merge` / merge /
+deploy verb is ever invoked** and the github module contains no such construction. This is
+the machine-checked proof of "no auto-merge / auto-deploy path".
+
+**Optional live test (opt-in, against a throwaway repo).** Gated on env so it never runs
+by default or in CI:
+
+```bash
+# Read-only: confirms gh auth + access to the throwaway repo, mutates nothing.
+AGENT_LOOP_GH_LIVE=1 AGENT_LOOP_GH_LIVE_REPO=your-org/throwaway-repo npm test -- github-pr
+```
+
+The live test only does `gh auth status` + `gh repo view` (read-only). Opening an actual
+draft PR against a throwaway repo remains a deliberate manual step — do it by hand with
+`agent-loop pr create` on a branch you don't mind, then delete the PR. There is, by
+design, no automated path that could merge or deploy it.
+
 ## Configuration
 
 ```yaml
