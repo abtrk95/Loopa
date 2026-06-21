@@ -1,0 +1,20 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+.claude-flow/
+
+# Transient / sensitive run data created by agent-loop in target repos.
+# (agent-loop also writes its own .gitignore into each project's .agent-loop dir.)
+.agent-loop/state/
+.agent-loop/events/
+.agent-loop/artifacts/
+.agent-loop/control/
+.agent-loop/reports/
+
+# Never commit local environment or credentials.
+.env
+.env.*
+*.pem
+*.key
