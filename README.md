@@ -51,19 +51,37 @@ npm run build
 node dist/bin/agent-loop.js demo      # throwaway repo, runs to COMPLETED, prints the dashboard
 ```
 
-Or drive it against a real repo with the fake provider:
+### Installing the `agent-loop` command
+
+This repo is unpublished, so there is no global `agent-loop` binary by default. Pick one:
+
+```bash
+npm link                              # makes `agent-loop` available on your PATH
+# …or invoke directly, no link needed:
+node dist/bin/agent-loop.js <command>
+npm run agent-loop -- <command>       # runs from source via tsx
+```
+
+The examples below assume you ran `npm link` (substitute one of the forms above otherwise).
+
+### Driving a real repository
 
 ```bash
 cd /path/to/your/git/repo
 agent-loop init
+git add -A && git commit -m "chore: add .agent-loop config"   # init writes config; commit it (runs require a clean tree)
 agent-loop plan --idea "Add a /health endpoint that returns 200 and a version string"
 agent-loop run --auto
 agent-loop status
 ```
 
-To use a real agent, edit `.agent-loop/config.yml` and point a role at `claude`,
-`codex`, or `opencode` (see [docs/provider-adapters.md](docs/provider-adapters.md) and
-[docs/configuration.md](docs/configuration.md)).
+> **Provider note.** The default `fake` provider is deterministic and **demo-only** — it
+> makes no edits for an arbitrary `--idea`, so a real plan run with it ends `BLOCKED`
+> (by design: it never fakes success). To actually implement a slice, point a role at a
+> real agent in `.agent-loop/config.yml` (`claude`, `codex`, or `opencode`) — see
+> [docs/provider-adapters.md](docs/provider-adapters.md) and
+> [docs/configuration.md](docs/configuration.md). The `demo` command above is the
+> end-to-end happy path that needs no credentials.
 
 ## Command reference
 
@@ -100,6 +118,31 @@ committed, a global `FINAL_VERIFYING` pass runs the project's checks against the
 integrated result. Independent slices can run in parallel in isolated git worktrees.
 Every step appends events to the SQLite log; the dashboard and `status` are pure
 projections of it.
+
+## Status & known limitations
+
+agent-loop is **beta**. The deterministic core — evidence-based completion, the SQLite
+event log, scoped/verified commits, safe parallel worktrees, the read-only dashboard,
+shell-free process execution, and the safety scanner — is implemented and tested
+(`npm run check`). The following are **not yet implemented / not wired**, and should not
+be relied on:
+
+- **`judge` role** — accepted in config but never invoked by the orchestrator (reserved).
+- **Browser/UI verification** — there is **no real browser** (no Playwright, screenshots,
+  console, or accessibility checks). `src/verify/browser.ts` is an experimental,
+  *unwired* command-smoke adapter (see [docs/verification.md](docs/verification.md)).
+- **Platform support is macOS/Linux only.** Windows is untested and currently broken
+  (shell-free spawning cannot launch `.cmd`/`.bat` provider/git shims; POSIX process
+  groups differ). CI covers Linux + macOS; a Windows job runs non-blocking.
+- **Threat model.** agent-loop verifies what *it* commits and rejects agent self-commits
+  and unverified trailer commits on resume. A human with direct write access to the
+  repository/git history is outside the threat model.
+
+Provider **fallback**, **switch-on-retry**, and **reviewer consensus** *are* implemented
+and exercised by tests as of this release.
+
+A full evidence-based assessment is in
+[docs/production-readiness-audit.md](docs/production-readiness-audit.md).
 
 ## Documentation
 

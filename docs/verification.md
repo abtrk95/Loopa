@@ -130,6 +130,17 @@ human reads to decide whether to fix-and-`retry` or adjust the plan. The reason 
 always grounded in evidence (a failing check, an out-of-scope path, a detected secret),
 never in agent narration.
 
+## UI / browser verification (experimental, not wired)
+
+There is **no real browser verification** today. `src/verify/browser.ts` defines an
+interface and a command-based adapter that would run a user-configured smoke/e2e command
+(e.g. `npm run e2e`) and save its **text** output under `.agent-loop/artifacts/ui-smoke/`
+— it captures no screenshots, console errors, or accessibility results, and it is **not
+invoked** by the verifier or executor in this release. The `browser` role exists in the
+schema as a reserved placeholder. Treat UI verification as a planned extension; do not
+rely on it. When wired, it would be an additional advisory check that can never override
+a deterministic verifier failure.
+
 ## Testing the verifier
 
 `test/integration/verifier-engine.test.ts` proves each control end-to-end with the fake

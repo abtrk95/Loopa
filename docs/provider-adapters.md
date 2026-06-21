@@ -47,9 +47,10 @@ over git state.
 
 ### Roles
 
-`planner | worker | reviewer | fixer | judge | browser`. A provider declares which roles
-it can serve via `capabilities().roles`. The router only assigns a provider to a role it
-can serve (see capability routing below).
+`planner | worker | reviewer | fixer` are active roles. `judge` and `browser` are
+**reserved** — present in the schema but not yet invoked by the orchestrator. A provider
+declares which roles it can serve via `capabilities().roles`. The router only assigns a
+provider to a role it can serve (see capability routing below).
 
 ## Structured output: the result marker
 
@@ -127,7 +128,8 @@ See [security-model.md](security-model.md) for the rationale.
 The `Router` (`routing.ts`) maps roles → provider+model per slice/attempt, pure over
 config plus an optional capability predicate:
 
-- **planner / reviewer / judge** — taken from their configured role refs.
+- **planner / reviewer** — taken from their configured role refs. (`judge` is reserved
+  and not yet invoked.)
 - **worker** — chosen from `roles.workers` by `routing.workerStrategy`:
   - `static` — always the first capable worker.
   - `round-robin` — cycle through capable workers (default).
@@ -135,11 +137,16 @@ config plus an optional capability predicate:
   - `capability` — a stable capable worker, advancing only on retry.
 - **fixer** — `same-as-worker` by default (reuses the worker selection), or a distinct
   configured provider.
-- **fallbacks** — `routing.fallbackOrder` lists providers to try when the primary fails;
-  `switchProviderOnRetry` advances the selection on each retry.
+- **fallbacks** — `routing.fallbackOrder` lists providers to try, in order, when a
+  provider fails to produce a result within an attempt. The executor fails over to the
+  next capable, registered fallback transparently (a definitive blocker/cancel stops the
+  chain).
+- **switchProviderOnRetry** — when set, each retry re-selects the worker (advancing the
+  pool/strategy) instead of reusing the same provider; otherwise retries use the fixer.
 
-The executor chooses the worker once per slice (first attempt) and uses the fixer for
-subsequent attempts.
+By default the executor chooses the worker once per slice (first attempt) and uses the
+fixer for subsequent attempts; `switchProviderOnRetry` and `fallbackOrder` change this as
+described above.
 
 ## Registry
 

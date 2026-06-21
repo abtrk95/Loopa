@@ -36,6 +36,8 @@ export interface EventStore {
   /** The most recent `limit` events (seq order ascending within the window). */
   recent(limit: number, runId?: string): AgentLoopEvent[];
   latestSeq(runId?: string): number;
+  /** Number of corrupt/undecodable rows skipped by reads so far this process. */
+  corruptRowCount(): number;
   /** Distinct run ids present in the store, newest first. */
   runIds(): string[];
   exportJsonl(path: string): number;
@@ -210,13 +212,15 @@ export class SqliteEventStore implements EventStore {
     return row ? this.rowToEvent(row) : undefined;
   }
 
+  private corruptRows = 0;
+
   read(runId?: string): AgentLoopEvent[] {
     const rows = (
       runId
         ? this.db.prepare('SELECT * FROM events WHERE run_id = ? ORDER BY seq ASC').all(runId)
         : this.db.prepare('SELECT * FROM events ORDER BY seq ASC').all()
     ) as EventRow[];
-    return rows.map((r) => this.rowToEvent(r));
+    return this.decode(rows);
   }
 
   readSince(afterSeq: number, runId?: string): AgentLoopEvent[] {
@@ -227,7 +231,7 @@ export class SqliteEventStore implements EventStore {
             .all(afterSeq, runId)
         : this.db.prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq ASC').all(afterSeq)
     ) as EventRow[];
-    return rows.map((r) => this.rowToEvent(r));
+    return this.decode(rows);
   }
 
   recent(limit: number, runId?: string): AgentLoopEvent[] {
@@ -238,7 +242,22 @@ export class SqliteEventStore implements EventStore {
             .all(runId, limit)
         : this.db.prepare('SELECT * FROM events ORDER BY seq DESC LIMIT ?').all(limit)
     ) as EventRow[];
-    return rows.map((r) => this.rowToEvent(r)).reverse();
+    return this.decode(rows).reverse();
+  }
+
+  /** Number of corrupt/undecodable rows skipped by reads so far this process. */
+  corruptRowCount(): number {
+    return this.corruptRows;
+  }
+
+  /** Decode rows, skipping (never throwing on) any corrupt/garbage row. */
+  private decode(rows: EventRow[]): AgentLoopEvent[] {
+    const out: AgentLoopEvent[] = [];
+    for (const r of rows) {
+      const ev = this.rowToEvent(r);
+      if (ev) out.push(ev);
+    }
+    return out;
   }
 
   latestSeq(runId?: string): number {
@@ -269,20 +288,29 @@ export class SqliteEventStore implements EventStore {
     this.db.close();
   }
 
-  private rowToEvent(row: EventRow): AgentLoopEvent {
-    return AgentLoopEventSchema.parse({
-      schemaVersion: row.schema_version,
-      eventId: row.event_id,
-      seq: row.seq,
-      ts: row.ts,
-      runId: row.run_id,
-      sliceId: row.slice_id,
-      attemptId: row.attempt_id,
-      correlationId: row.correlation_id,
-      source: row.source,
-      type: row.type,
-      payload: JSON.parse(row.payload) as Record<string, unknown>,
-    });
+  private rowToEvent(row: EventRow): AgentLoopEvent | undefined {
+    try {
+      return AgentLoopEventSchema.parse({
+        schemaVersion: row.schema_version,
+        eventId: row.event_id,
+        seq: row.seq,
+        ts: row.ts,
+        runId: row.run_id,
+        sliceId: row.slice_id,
+        attemptId: row.attempt_id,
+        correlationId: row.correlation_id,
+        source: row.source,
+        type: row.type,
+        payload: JSON.parse(row.payload) as Record<string, unknown>,
+      });
+    } catch {
+      // A corrupt/garbage payload row (disk corruption, partial write, manual edit,
+      // or a future-schema row) must NEVER poison a read of the whole log — that
+      // would crash the orchestrator loop and the watcher with an unhandled
+      // SyntaxError/ZodError. Skip it; recovery and reporting proceed on good rows.
+      this.corruptRows++;
+      return undefined;
+    }
   }
 }
 

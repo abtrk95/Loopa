@@ -38,6 +38,14 @@ export async function cmdPr(args: ParsedArgs): Promise<number> {
       snap,
       new ProcessManager(),
     );
+    // Record the action in the run's event log (audit trail).
+    store.append({
+      runId: meta.runId,
+      type: 'PR_CREATED',
+      source: 'github',
+      idempotencyKey: `pr:${meta.branch}:${result.url}`,
+      payload: { url: result.url, created: result.created, branch: meta.branch },
+    });
     process.stdout.write(`${result.created ? 'Created' : 'Existing'} PR: ${result.url}\n`);
     return 0;
   } finally {

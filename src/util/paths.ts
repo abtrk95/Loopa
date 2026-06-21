@@ -23,7 +23,8 @@ export interface ProjectPaths {
   readonly logsDir: string;
   readonly reviewsDir: string;
   readonly checksDir: string;
-  readonly screenshotsDir: string;
+  /** Output of the optional UI smoke command (text logs, NOT screenshots). */
+  readonly uiSmokeDir: string;
   readonly contextDir: string;
   readonly worktreesDir: string;
   readonly reportsDir: string;
@@ -49,7 +50,7 @@ export function projectPaths(root: string): ProjectPaths {
     logsDir: join(artifactsDir, 'logs'),
     reviewsDir: join(artifactsDir, 'reviews'),
     checksDir: join(artifactsDir, 'checks'),
-    screenshotsDir: join(artifactsDir, 'screenshots'),
+    uiSmokeDir: join(artifactsDir, 'ui-smoke'),
     contextDir: join(artifactsDir, 'context'),
     worktreesDir: join(dir, 'worktrees'),
     reportsDir: join(dir, 'reports'),
@@ -67,7 +68,7 @@ export function ensureLayout(paths: ProjectPaths): void {
     paths.logsDir,
     paths.reviewsDir,
     paths.checksDir,
-    paths.screenshotsDir,
+    paths.uiSmokeDir,
     paths.contextDir,
     paths.worktreesDir,
     paths.reportsDir,

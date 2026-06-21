@@ -6,7 +6,7 @@
 
 ## Context
 
-`agent-loop` is a local-first, production-grade autonomous coding loop. It must:
+`agent-loop` is a local-first, evidence-driven autonomous coding loop (beta). It must:
 orchestrate subprocesses (git, project build/test commands, and provider CLIs);
 maintain a durable, crash-safe, append-only event store; render a live terminal
 dashboard that can attach/detach/reconnect; validate rich structured schemas; and be

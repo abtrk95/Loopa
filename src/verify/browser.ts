@@ -1,10 +1,13 @@
 /**
- * Optional browser verification adapter for frontend/UI slices. Kept behind an
- * interface so heavyweight browser tooling (e.g. Playwright) is never a core
- * dependency. The default is a no-op; a command-based implementation runs a
- * user-configured smoke command (e.g. `npm run e2e`) and saves its output as an
- * artifact. Results feed the verifier as an additional check — they cannot
- * override deterministic failures.
+ * Optional UI smoke-check adapter for frontend slices.
+ *
+ * STATUS: EXPERIMENTAL / NOT WIRED. This module is not yet invoked by the verifier
+ * or executor. There is NO real browser here — no Playwright/Puppeteer, no
+ * navigation, no screenshots, no console-error or accessibility capture. The
+ * command-based implementation simply runs a user-configured smoke/e2e command
+ * (e.g. `npm run e2e`) and saves its TEXT output as an artifact. When wired in
+ * future, results would feed the verifier as an additional advisory check and
+ * could never override deterministic failures. See docs/verification.md.
  */
 import { join } from 'node:path';
 import { atomicWrite } from '../util/fs.js';
@@ -14,7 +17,8 @@ import type { CommandSpec } from '../domain/schemas.js';
 
 export interface BrowserCheckRequest {
   cwd: string;
-  screenshotsDir: string;
+  /** Where the UI smoke command's text log is written (no screenshots are captured). */
+  uiSmokeDir: string;
   sliceId: string;
   pm: ProcessManager;
   redactor: Redactor;
@@ -55,7 +59,7 @@ export class CommandBrowserVerifier implements BrowserVerifier {
         ...(req.signal ? { signal: req.signal } : {}),
       })
       .catch((err: unknown) => ({ ok: false, stdout: '', stderr: (err as Error).message, exitCode: null as number | null, durationMs: 0, command: '' }));
-    const log = join(req.screenshotsDir, `${req.sliceId}__browser.log`);
+    const log = join(req.uiSmokeDir, `${req.sliceId}__ui-smoke.log`);
     atomicWrite(log, `[stdout]\n${res.stdout}\n[stderr]\n${res.stderr}\n`);
     return {
       ok: res.ok,

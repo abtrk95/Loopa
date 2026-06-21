@@ -12,7 +12,8 @@
  *   block — a hard violation (secret, write under .git, path traversal, symlink
  *           escape, forbidden path) → stop; not auto-retryable
  */
-import { join } from 'node:path';
+import { isAbsolute, join, normalize, resolve, sep, dirname } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { atomicWrite } from '../util/fs.js';
 import type { GitRepo } from '../git/repo.js';
 import type { ProcessManager } from '../process/manager.js';
@@ -21,7 +22,7 @@ import type { Slice, Plan, CheckSpec, Expect } from '../domain/schemas.js';
 import type { Config } from '../config/config.js';
 import { evaluateScope, structuralScan } from '../git/scope.js';
 import { resolveCommand } from '../process/command.js';
-import { detectSecretsInDiff, detectTestWeakening, lockfilesIn } from './checks.js';
+import { detectSecretsInDiff, detectTestWeakening, detectMergeConflicts, lockfilesIn } from './checks.js';
 
 export type Verdict = 'pass' | 'fail' | 'block';
 
@@ -35,6 +36,7 @@ export interface CheckResult {
     | 'secrets'
     | 'diff-size'
     | 'test-weakening'
+    | 'merge-conflict'
     | 'lockfile'
     | 'command';
   ok: boolean;
@@ -156,7 +158,7 @@ export async function verify(input: VerifyInput): Promise<VerificationResult> {
 
     // --- secrets ---
     if (config.verification.detectSecrets) {
-      const diff = await repo.diffWithUntracked();
+      const diff = await repo.diffWithUntracked({ raw: true });
       const hits = detectSecretsInDiff(diff);
       record({ id: 'secrets', command: 'secret-scan', kind: 'secrets', ok: hits.length === 0, durationMs: 0, summary: hits.length === 0 ? 'no secrets in diff' : `${hits.length} potential secret(s)` });
       if (hits.length > 0) {
@@ -176,12 +178,23 @@ export async function verify(input: VerifyInput): Promise<VerificationResult> {
 
     // --- test weakening ---
     if (config.verification.detectTestWeakening) {
-      const diff = await repo.diffWithUntracked();
+      const diff = await repo.diffWithUntracked({ raw: true });
       const weak = detectTestWeakening(diff);
       record({ id: 'test-weakening', command: 'test-weakening-scan', kind: 'test-weakening', ok: weak.length === 0, durationMs: 0, summary: weak.length === 0 ? 'no test weakening' : weak.map((w) => w.kind).join(', ') });
       if (weak.length > 0) {
         for (const w of weak) findings.push({ severity: 'fail', detail: `test weakening (${w.kind}): ${w.detail}` });
         downgrade('fail', 'test weakening detected');
+      }
+    }
+
+    // --- merge conflict markers ---
+    {
+      const diff = await repo.diffWithUntracked({ raw: true });
+      const conflicts = detectMergeConflicts(diff);
+      record({ id: 'merge-conflict', command: 'merge-conflict-scan', kind: 'merge-conflict', ok: conflicts.length === 0, durationMs: 0, summary: conflicts.length === 0 ? 'no conflict markers' : `${conflicts.length} conflict marker(s)` });
+      if (conflicts.length > 0) {
+        for (const c of conflicts) findings.push({ severity: 'fail', detail: `merge conflict marker: ${c}` });
+        downgrade('fail', 'unresolved merge conflict markers');
       }
     }
 
@@ -251,6 +264,178 @@ export async function verify(input: VerifyInput): Promise<VerificationResult> {
   }
 
   return { verdict, ...(reason ? { reason } : {}), checks, findings, changedFiles, addedLines };
+}
+
+export interface CommitSafetyResult {
+  ok: boolean;
+  reason?: string;
+  findings: Finding[];
+}
+
+export interface CommitSafetyInput {
+  repo: GitRepo;
+  slice: Slice;
+  plan: Plan;
+  config: Config;
+  sha: string;
+}
+
+/**
+ * Re-verify the deterministic SAFETY of an already-committed diff (the diff a
+ * commit introduces), independent of the working tree. Used wherever a slice is
+ * recovered/accepted by its `agent-loop-slice` trailer rather than freshly verified
+ * (resume reconciliation, and the executor's idempotent commit-reuse). A trailer is
+ * just an unauthenticated string in a commit message; without this check a planted
+ * or tampered commit could advance a slice to COMPLETED with zero verification.
+ *
+ * Runs the same path/content scans as the live verifier (scope, structural escapes,
+ * secrets, diff size, test weakening, lockfile policy). It does NOT re-run the
+ * project's command checks — those are expensive and were satisfied when the verified
+ * commit was originally created; the goal here is to reject commits that never went
+ * through scoped verification at all.
+ */
+export async function verifyCommitSafety(input: CommitSafetyInput): Promise<CommitSafetyResult> {
+  const { repo, slice, plan, config, sha } = input;
+  const findings: Finding[] = [];
+  let verdict: Verdict = 'pass';
+  let reason: string | undefined;
+  const downgrade = (to: Verdict, why: string): void => {
+    if (to === 'block') {
+      verdict = 'block';
+      reason = why;
+    } else if (to === 'fail' && verdict === 'pass') {
+      verdict = 'fail';
+      reason = why;
+    }
+  };
+
+  const changedFiles = (await repo.commitChangedPaths(sha)).filter(
+    (p) => !INTERNAL_PREFIXES.some((pre) => p.startsWith(pre)),
+  );
+  if (changedFiles.length === 0) {
+    return { ok: false, reason: 'recovered commit touches no project files', findings };
+  }
+
+  // --- scope policy ---
+  const scope = evaluateScope({
+    changedPaths: changedFiles,
+    allowedPaths: slice.allowedPaths,
+    forbiddenPaths: slice.forbiddenPaths,
+    globalForbidden: plan.riskPolicy.globalForbiddenPaths,
+  });
+  if (scope.forbidden.length > 0) {
+    findings.push({ severity: 'block', detail: `forbidden paths modified: ${scope.forbidden.join(', ')}` });
+    downgrade('block', 'modified forbidden paths');
+  }
+  if (scope.outOfScope.length > 0) {
+    findings.push({ severity: 'fail', detail: `out-of-scope paths: ${scope.outOfScope.join(', ')}` });
+    downgrade('fail', 'changed files outside allowedPaths');
+  }
+
+  // --- structural safety (path + raw-mode + symlink target) ---
+  for (const f of await commitStructuralFindings(repo, sha, changedFiles)) {
+    if (f.kind === 'git-internal' || f.kind === 'traversal' || f.kind === 'symlink-escape') {
+      findings.push({ severity: 'block', detail: `${f.kind}: ${f.path}` });
+      downgrade('block', `${f.kind} detected`);
+    } else if (f.kind === 'submodule') {
+      findings.push({ severity: 'fail', detail: `submodule change: ${f.path}` });
+      downgrade('fail', 'submodule change');
+    } else {
+      findings.push({ severity: 'flag', detail: `${f.kind}: ${f.path}` });
+    }
+  }
+
+  const diff = await repo.commitDiff(sha);
+
+  // --- secrets ---
+  if (config.verification.detectSecrets) {
+    const hits = detectSecretsInDiff(diff);
+    if (hits.length > 0) {
+      for (const h of hits) findings.push({ severity: 'block', detail: `secret: ${h.snippet}` });
+      downgrade('block', 'potential secret in diff');
+    }
+  }
+
+  // --- diff size ---
+  const maxLines = Math.min(plan.riskPolicy.maxDiffLines, config.verification.maxDiffLines);
+  const added = await repo.commitAddedLines(sha);
+  if (added > maxLines) {
+    findings.push({ severity: 'fail', detail: `diff too large: ${added} > ${maxLines}` });
+    downgrade('fail', 'diff exceeds size limit');
+  }
+
+  // --- test weakening ---
+  if (config.verification.detectTestWeakening) {
+    const weak = detectTestWeakening(diff);
+    if (weak.length > 0) {
+      for (const w of weak) findings.push({ severity: 'fail', detail: `test weakening (${w.kind}): ${w.detail}` });
+      downgrade('fail', 'test weakening detected');
+    }
+  }
+
+  // --- merge conflict markers ---
+  const conflicts = detectMergeConflicts(diff);
+  if (conflicts.length > 0) {
+    for (const c of conflicts) findings.push({ severity: 'fail', detail: `merge conflict marker: ${c}` });
+    downgrade('fail', 'unresolved merge conflict markers');
+  }
+
+  // --- lockfile policy ---
+  const locks = lockfilesIn(changedFiles);
+  if (locks.length > 0 && !plan.riskPolicy.allowLockfileChanges) {
+    findings.push({ severity: 'fail', detail: `lockfile change not allowed: ${locks.join(', ')}` });
+    downgrade('fail', 'lockfile change not allowed');
+  }
+
+  return { ok: verdict === 'pass', ...(reason ? { reason } : {}), findings };
+}
+
+/** Structural escapes detectable from a commit's raw diff + blob contents. */
+async function commitStructuralFindings(
+  repo: GitRepo,
+  sha: string,
+  changedPaths: string[],
+): Promise<Array<{ kind: 'git-internal' | 'traversal' | 'symlink-escape' | 'symlink' | 'submodule'; path: string }>> {
+  const out: Array<{ kind: 'git-internal' | 'traversal' | 'symlink-escape' | 'symlink' | 'submodule'; path: string }> = [];
+  const rootReal = safeRealpath(repo.dir) ?? repo.dir;
+  for (const rel of changedPaths) {
+    const posix = rel.split(sep).join('/');
+    if (posix === '.git' || posix.startsWith('.git/')) {
+      out.push({ kind: 'git-internal', path: rel });
+      continue;
+    }
+    if (isAbsolute(rel) || normalize(rel).split('/').includes('..')) {
+      out.push({ kind: 'traversal', path: rel });
+      continue;
+    }
+    if (posix === '.gitmodules') out.push({ kind: 'submodule', path: rel });
+  }
+  // Inspect raw diff for new/changed symlinks (mode 120000) and gitlinks (160000).
+  const raw = await repo.commitRaw(sha);
+  for (const line of raw.split('\n')) {
+    // :<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>
+    const m = line.match(/^:\d{6}\s+(\d{6})\s+\S+\s+\S+\s+\S+\t(.+)$/);
+    if (!m) continue;
+    const newMode = m[1]!;
+    const path = m[2]!.trim();
+    if (newMode === '160000') {
+      out.push({ kind: 'submodule', path });
+    } else if (newMode === '120000') {
+      const target = (await repo.readBlobAtCommit(sha, path))?.trim() ?? '';
+      const resolved = resolve(rootReal, dirname(path), target);
+      const escapes = !resolved.startsWith(rootReal + sep) && resolved !== rootReal;
+      out.push({ kind: escapes ? 'symlink-escape' : 'symlink', path });
+    }
+  }
+  return out;
+}
+
+function safeRealpath(p: string): string | undefined {
+  try {
+    return realpathSync(p);
+  } catch {
+    return undefined;
+  }
 }
 
 interface ResolvedCheck {

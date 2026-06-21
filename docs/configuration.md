@@ -41,13 +41,13 @@ roles:
   #   model: "<model-id>"
   fixer:
     strategy: same-as-worker   # or a full provider ref
-  # judge / browser:   # optional roles
+  # judge / browser:           # RESERVED — accepted but not yet wired (no effect)
 
 routing:
   workerStrategy: round-robin  # static | round-robin | weighted | capability
-  fallbackOrder: []            # providers to try when the primary fails
-  switchProviderOnRetry: false
-  reviewerConsensus: 1         # run N reviewers, require consensus
+  fallbackOrder: []            # providers to try when a provider fails (implemented)
+  switchProviderOnRetry: false # advance the worker pool on each retry (implemented)
+  reviewerConsensus: 1         # run N reviews of the configured reviewer; all must pass
 
 execution:
   concurrency: 1               # parallel slices (via worktrees)
@@ -106,8 +106,13 @@ error, not a silently-ignored typo.
 ### `roles`
 Maps each role to a provider reference `{ provider, model?, weight, options }`.
 `workers` is a non-empty array (the pool the router draws from). `fixer` is either
-`{ strategy: same-as-worker }` or a full provider ref. `reviewer`, `judge`, and
-`browser` are optional — omitting `reviewer` disables the advisory review pass entirely.
+`{ strategy: same-as-worker }` or a full provider ref. `reviewer` is optional —
+omitting it disables the advisory review pass entirely.
+
+> **Reserved roles.** `judge` and `browser` are accepted by the schema but are
+> **not yet wired** into the orchestrator (the judge is never invoked; the browser
+> adapter is an experimental, unwired UI smoke-command runner with no real browser).
+> Setting them has no runtime effect today. See the Status section in the README.
 
 ### `routing`
 Controls worker selection strategy, provider fallbacks, retry-switching, and reviewer

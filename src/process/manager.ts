@@ -27,6 +27,13 @@ export interface RunOptions {
   /** Data written to the child's stdin, then closed. */
   input?: string;
   redactor?: Redactor;
+  /**
+   * Skip redaction of captured output. ONLY for internal reads whose result is fed to
+   * deterministic scanners (e.g. the secret/test-weakening diff scans) and never
+   * persisted or displayed raw — redaction there would hide the very secrets the
+   * scanner must detect. Never set this for provider/agent output.
+   */
+  noRedact?: boolean;
   onOutput?: (stream: 'stdout' | 'stderr', chunk: string) => void;
   signal?: AbortSignal;
 }
@@ -83,6 +90,7 @@ export class ProcessManager {
   async run(spec: CommandSpec, opts: RunOptions): Promise<RunResult> {
     const argv = resolveCommand(spec);
     const redactor = opts.redactor ?? new Redactor();
+    const apply = opts.noRedact ? (s: string): string => s : (s: string): string => redactor.redact(s);
     const maxOutput = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
@@ -143,12 +151,12 @@ export class ProcessManager {
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d: string) => {
-      const red = redactor.redact(d);
+      const red = apply(d);
       stdout.push(red);
       opts.onOutput?.('stdout', red);
     });
     child.stderr.on('data', (d: string) => {
-      const red = redactor.redact(d);
+      const red = apply(d);
       stderr.push(red);
       opts.onOutput?.('stderr', red);
     });

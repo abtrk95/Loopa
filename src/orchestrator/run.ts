@@ -20,7 +20,7 @@ import { WorktreePool } from '../git/worktree.js';
 import { ControlPlane } from './control.js';
 import { eligibleSlices, topoOrder, canRunInParallel } from '../planner/graph.js';
 import { executeSlice, type ExecContext, type SliceOutcome } from './executor.js';
-import { verify } from '../verify/verifier.js';
+import { verify, verifyCommitSafety } from '../verify/verifier.js';
 import type { DependencyResult } from './context.js';
 import { generateReport } from './report.js';
 
@@ -163,6 +163,8 @@ export class RunEngine {
     }
     this.baselineSha = await git.headSha();
     saveRunMeta(this.session.paths, { ...this.meta, branch: this.branch, baselineSha: this.baselineSha });
+    // Clear any orphan parallel-worktree branches a prior crashed run left behind.
+    await this.pruneStaleWorktrees();
   }
 
   private async ensureOnBranch(): Promise<void> {
@@ -177,19 +179,53 @@ export class RunEngine {
 
   /** On resume, recover slices whose commit landed before the event was written. */
   private async reconcile(): Promise<void> {
+    await this.pruneStaleWorktrees();
     for (const slice of this.plan.slices) {
       if (this.completed.has(slice.id) || this.blocked.has(slice.id) || this.failed.has(slice.id)) continue;
       const commit = await this.session.git.findSliceCommit(slice.id);
-      if (commit) {
-        this.emit({ type: 'COMMIT_CREATED', source: 'git', sliceId: slice.id, idempotencyKey: `commit:${slice.id}`, payload: { sha: commit.sha, message: commit.message } });
-        this.emit({ type: 'SLICE_STATE_CHANGED', source: 'orchestrator', sliceId: slice.id, payload: { from: 'PENDING', to: 'COMPLETED' } });
-        this.emit({ type: 'SLICE_COMPLETED', source: 'orchestrator', sliceId: slice.id, payload: { sha: commit.sha, summary: 'recovered on resume' } });
-        this.completed.add(slice.id);
-        this.dependencyResults.set(slice.id, { id: slice.id, title: slice.title, summary: `committed ${commit.sha}` });
+      if (!commit) continue;
+      // Trust git, not the trailer. The `agent-loop-slice` trailer is an
+      // unauthenticated string; a slice is recovered as COMPLETED only if the
+      // commit it points to STILL passes deterministic safety re-verification
+      // (scope, structural escapes, secrets, size, test-weakening). Otherwise the
+      // slice is left PENDING and re-executed under full verification — a planted
+      // or tampered commit can never advance progress on resume.
+      const safety = await verifyCommitSafety({
+        repo: this.session.git,
+        slice,
+        plan: this.plan,
+        config: this.session.config,
+        sha: commit.sha,
+      });
+      if (!safety.ok) {
+        this.session.logger.warn(
+          `ignoring unverified trailer commit ${commit.sha.slice(0, 8)} for ${slice.id} on resume: ${safety.reason ?? 'failed re-verification'}`,
+          { sliceId: slice.id },
+        );
+        continue;
       }
+      this.emit({ type: 'COMMIT_CREATED', source: 'git', sliceId: slice.id, idempotencyKey: `commit:${slice.id}`, payload: { sha: commit.sha, message: commit.message } });
+      this.emit({ type: 'SLICE_STATE_CHANGED', source: 'orchestrator', sliceId: slice.id, payload: { from: 'PENDING', to: 'COMPLETED' } });
+      this.emit({ type: 'SLICE_COMPLETED', source: 'orchestrator', sliceId: slice.id, payload: { sha: commit.sha, summary: 'recovered on resume' } });
+      this.completed.add(slice.id);
+      this.dependencyResults.set(slice.id, { id: slice.id, title: slice.title, summary: `committed ${commit.sha}` });
     }
     // Discard any uncommitted leftovers from an interrupted attempt.
     await this.session.git.rollback();
+  }
+
+  /**
+   * Remove orphaned parallel-worktree branches/dirs left by a crashed parallel
+   * batch. Without this, `git worktree add -b aloop-wt/...` on the next run/resume
+   * fails with "branch already exists" and the run can never recover.
+   */
+  private async pruneStaleWorktrees(): Promise<void> {
+    if (!this.branch) return;
+    await this.session.git.pruneWorktrees();
+    const runToken = this.branch.replace(/[^A-Za-z0-9_-]/g, '-');
+    for (const b of await this.session.git.listBranches(`aloop-wt/${runToken}-`)) {
+      await this.session.git.deleteBranch(b);
+    }
   }
 
   /** On resume/retry, blocked slices become eligible again for another attempt. */
@@ -283,6 +319,18 @@ export class RunEngine {
             outcome.status = 'failed';
             outcome.reason = 'merge conflict during parallel integration';
             this.emit({ type: 'SLICE_BLOCKED', source: 'orchestrator', sliceId: outcome.sliceId, payload: { reason: outcome.reason } });
+          } else {
+            // Cherry-pick re-writes the sha; record the integrated run-branch commit
+            // so events/projection point at a commit that is actually on the branch.
+            const integratedSha = await this.session.git.headSha();
+            outcome.sha = integratedSha;
+            this.emit({
+              type: 'COMMIT_CREATED',
+              source: 'git',
+              sliceId: outcome.sliceId,
+              idempotencyKey: `integrate:${outcome.sliceId}`,
+              payload: { sha: integratedSha, message: outcome.summary ?? outcome.sliceId, integrated: true },
+            });
           }
         }
       }

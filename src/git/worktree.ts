@@ -33,9 +33,11 @@ export class WorktreePool {
     // the run branch (git forbids a ref being both a file and a directory).
     const runToken = this.runBranch.replace(/[^A-Za-z0-9_-]/g, '-');
     const branch = `aloop-wt/${runToken}-${safe}`;
-    // Clean any stale worktree at this path first.
+    // Clean any stale worktree at this path first, including a leftover branch of
+    // the same name from a crashed run (else `git worktree add -b` fails hard).
     await this.main.removeWorktree(path);
     rmSyncSafe(path);
+    await this.main.deleteBranch(branch);
     const repo = await this.main.addWorktree(path, branch, baseRef);
     const handle: WorktreeHandle = { sliceId, path, branch, repo };
     this.handles.set(sliceId, handle);

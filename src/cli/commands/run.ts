@@ -75,7 +75,32 @@ export async function cmdRetry(args: ParsedArgs): Promise<number> {
 }
 
 async function executeRun(session: Session, plan: Plan, meta: RunMeta, args: ParsedArgs, resume: boolean): Promise<number> {
-  const engine = new RunEngine(session, plan, meta);
+  // Graceful cancellation: SIGINT/SIGTERM abort the engine, which kills the active
+  // child process groups and drives the run to a CANCELLED terminal state.
+  const controller = new AbortController();
+  let interrupts = 0;
+  const onSignal = (): void => {
+    interrupts++;
+    if (interrupts === 1) {
+      process.stderr.write('\nstopping run (signal received) — finishing safely…\n');
+      controller.abort();
+    } else {
+      // A second signal: hard exit (children already receive SIGTERM via abort).
+      process.exit(130);
+    }
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  try {
+    return await executeRunInner(session, plan, meta, args, resume, controller);
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
+}
+
+async function executeRunInner(session: Session, plan: Plan, meta: RunMeta, args: ParsedArgs, resume: boolean, controller: AbortController): Promise<number> {
+  const engine = new RunEngine(session, plan, meta, { signal: controller.signal });
   const watch = flagBool(args, 'watch');
 
   if (watch) {

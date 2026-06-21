@@ -157,7 +157,9 @@ The closest in spirit to this product.
 - **SQLite (WAL) event store** with sequence numbers, transactions, and migrations,
   rather than a single NDJSON file (NDJSON retained as an optional export).
 - **IPC control plane** so the watcher can pause/resume/stop without editing state.
-- **Structured reviewer schema** with validation, plus an optional browser verifier.
+- **Structured reviewer schema** with validation. (An optional browser/UI verifier is a
+  planned extension — currently an experimental, unwired smoke-command adapter, not a
+  real browser.)
 
 **Selected for `agent-loop` (reimplemented clean-room)**
 - Event-sourced spine + pure projection — `src/events/`.

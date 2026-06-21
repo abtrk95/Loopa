@@ -101,6 +101,11 @@ export function cmdInit(args: ParsedArgs): number {
       '  agent-loop watch                       # live dashboard (another terminal)',
       '  agent-loop demo                        # deterministic demo, no API keys',
       '',
+      "If `agent-loop` is not on your PATH, run it via `npm link` (then `agent-loop ...`),",
+      'or invoke it directly: `node dist/bin/agent-loop.js <cmd>` / `npm run agent-loop -- <cmd>`.',
+      'Note: the default `fake` provider only succeeds inside `demo`. To run a real --idea',
+      'plan to completion, configure a provider (claude/codex/opencode) in .agent-loop/config.yml.',
+      '',
     ].join('\n'),
   );
   return 0;

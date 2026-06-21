@@ -16,16 +16,18 @@ import type { Config } from '../config/config.js';
 import type { Plan, Slice, Risk } from '../domain/schemas.js';
 import type { ProjectPaths } from '../util/paths.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import type { Router } from '../providers/routing.js';
+import type { Router, Selection } from '../providers/routing.js';
 import type { Redactor } from '../security/redact.js';
 import type { Logger } from '../util/logger.js';
 import type { Clock } from '../util/clock.js';
 import type { GitRepo } from '../git/repo.js';
 import type { ProcessManager } from '../process/manager.js';
+import type { Role } from '../domain/schemas.js';
 import { assertSliceTransition, type SliceState } from '../domain/states.js';
 import { newAttemptId } from '../domain/ids.js';
 import { buildContextPack, type DependencyResult, type PreviousFailure } from './context.js';
-import { verify, type VerificationResult } from '../verify/verifier.js';
+import { verify, verifyCommitSafety, type VerificationResult } from '../verify/verifier.js';
+import type { ProviderResult } from '../providers/types.js';
 import { runReview } from '../review/reviewer.js';
 import { maxAttempts, canRetry, backoffDelayMs, sleep } from './retry.js';
 
@@ -74,7 +76,15 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
   for (let attempt = 1; attempt <= total; attempt++) {
     if (ctx.signal.aborted) return { sliceId: slice.id, status: 'failed', reason: 'cancelled' };
     const role: 'worker' | 'fixer' = attempt === 1 ? 'worker' : 'fixer';
-    const selection = role === 'fixer' ? ctx.router.fixer(workerSelection) : workerSelection;
+    // Retry provider policy: by default the fixer is same-as-worker; with
+    // routing.switchProviderOnRetry the worker pool advances on each retry so a
+    // flaky provider is replaced rather than repeated.
+    const selection =
+      attempt === 1
+        ? workerSelection
+        : ctx.config.routing.switchProviderOnRetry
+          ? ctx.router.worker(attempt)
+          : ctx.router.fixer(workerSelection);
     const attemptId = newAttemptId();
 
     // Clean-tree invariant: discard any leftover work so the diff we verify is
@@ -82,15 +92,6 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
     await workRepo.rollback();
     transition('PREPARING');
     const headBefore = await workRepo.headSha();
-
-    const adapter = ctx.registry.get(selection.provider);
-    ctx.emit({
-      type: 'PROVIDER_SELECTED',
-      source: 'orchestrator',
-      sliceId: slice.id,
-      attemptId,
-      payload: { role, provider: selection.provider, model: selection.model ?? null },
-    });
 
     const pack = buildContextPack({
       plan: ctx.plan,
@@ -109,36 +110,29 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
 
     ctx.emit({ type: 'SLICE_STARTED', source: 'orchestrator', sliceId: slice.id, attemptId, payload: { title: slice.title, attempt } });
     transition('EXECUTING');
-    ctx.emit({ type: 'AGENT_PROCESS_STARTED', source: 'process', sliceId: slice.id, attemptId, payload: { command: selection.provider, role } });
 
-    let outputLines = 0;
-    const result = await adapter.execute({
-      role,
-      contextPack: pack,
-      cwd: workRepo.dir,
-      model: selection.model,
-      timeoutMs: ctx.config.execution.agentTimeoutMs,
-      redactor: ctx.redactor,
-      signal: ctx.signal,
-      sliceId: slice.id,
-      attempt,
-      onOutput: (_stream, chunk) => {
-        if (outputLines >= 100) return;
-        for (const line of chunk.split('\n')) {
-          if (!line.trim() || outputLines >= 100) continue;
-          outputLines++;
-          // Defense in depth: redact even fake-provider output before it is stored.
-          ctx.emit({ type: 'AGENT_PROCESS_OUTPUT', source: 'process', sliceId: slice.id, attemptId, payload: { line: ctx.redactor.redact(line.slice(0, 500)) } });
-        }
-      },
-    });
-    ctx.emit({
-      type: 'AGENT_PROCESS_EXITED',
-      source: 'process',
-      sliceId: slice.id,
-      attemptId,
-      payload: { exitCode: result.exitCode, costUsd: result.costUsd ?? 0, tokens: result.tokens ?? 0, timedOut: result.timedOut },
-    });
+    // Run the agent, transparently failing over to configured fallback providers
+    // (routing.fallbackOrder) when a provider cannot produce a result.
+    const result = await runAgentWithFallback(ctx, slice, role, attempt, attemptId, selection, pack, workRepo.dir);
+
+    // Working-tree contract: the agent may only leave UNCOMMITTED changes. If it
+    // created its own commit(s), HEAD drifts — those changes never pass through the
+    // scoped verifier and would even survive a `reset --hard HEAD` rollback. This is
+    // a hard structural violation: undo it and block.
+    if (result.ok) {
+      const headAfter = await workRepo.headSha();
+      if (headAfter !== headBefore) {
+        await workRepo.resetHardTo(headBefore);
+        return blockSlice(
+          ctx,
+          slice,
+          transition,
+          'agent created its own commit(s); only working-tree edits are allowed',
+          [`HEAD moved ${headBefore.slice(0, 8)} -> ${headAfter.slice(0, 8)} (self-commit bypasses scoped verification)`],
+          attempt,
+        );
+      }
+    }
 
     // Agent explicitly signalled a blocker.
     if (result.blocker) {
@@ -210,8 +204,17 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
 
     // --- scoped commit (idempotent) ---
     transition('COMMITTING');
+    // Reuse an existing trailer commit ONLY if it still passes deterministic safety
+    // re-verification — a bare `agent-loop-slice` trailer is unauthenticated and must
+    // not be trusted to short-circuit a fresh scoped commit of just-verified files.
     const existing = await workRepo.findSliceCommit(slice.id);
-    const commit = existing ?? (await workRepo.scopedCommit(v.changedFiles, `${slice.id} ${slice.title}`, slice.id));
+    const reuseExisting =
+      existing !== undefined &&
+      (await verifyCommitSafety({ repo: workRepo, slice, plan: ctx.plan, config: ctx.config, sha: existing.sha })).ok;
+    const commit =
+      reuseExisting && existing
+        ? existing
+        : await workRepo.scopedCommit(v.changedFiles, `${slice.id} ${slice.title}`, slice.id);
     ctx.emit({
       type: 'COMMIT_CREATED',
       source: 'git',
@@ -228,6 +231,85 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
 
   // Unreachable in practice (the loop returns), but typed as a safety net.
   return blockSlice(ctx, slice, transition, 'attempt budget exhausted', [], total);
+}
+
+/** Providers to try this attempt: the primary, then each capable, registered fallback. */
+function providerCandidates(ctx: ExecContext, primary: Selection, role: Role): Selection[] {
+  const out: Selection[] = [primary];
+  const seen = new Set([primary.provider]);
+  for (const fb of ctx.router.fallbacks(primary.provider)) {
+    if (seen.has(fb.provider) || !ctx.registry.has(fb.provider)) continue;
+    if (!ctx.registry.get(fb.provider).capabilities().roles.includes(role)) continue;
+    seen.add(fb.provider);
+    out.push(fb);
+  }
+  return out;
+}
+
+/**
+ * Execute the agent for one attempt, transparently failing over to the next
+ * configured fallback provider when a provider cannot produce a result (spawn
+ * failure / timeout / non-ok exit). A definitive outcome (ok, an explicit blocker,
+ * or cancellation) stops the chain; only hard provider failures fall through.
+ */
+async function runAgentWithFallback(
+  ctx: ExecContext,
+  slice: Slice,
+  role: 'worker' | 'fixer',
+  attempt: number,
+  attemptId: string,
+  primary: Selection,
+  pack: string,
+  cwd: string,
+): Promise<ProviderResult> {
+  const candidates = providerCandidates(ctx, primary, role);
+  let last: ProviderResult | undefined;
+  for (let i = 0; i < candidates.length; i++) {
+    const sel = candidates[i]!;
+    const adapter = ctx.registry.get(sel.provider);
+    ctx.emit({
+      type: 'PROVIDER_SELECTED',
+      source: 'orchestrator',
+      sliceId: slice.id,
+      attemptId,
+      payload: { role, provider: sel.provider, model: sel.model ?? null, fallback: i > 0 },
+    });
+    ctx.emit({ type: 'AGENT_PROCESS_STARTED', source: 'process', sliceId: slice.id, attemptId, payload: { command: sel.provider, role } });
+    let outputLines = 0;
+    const result = await adapter.execute({
+      role,
+      contextPack: pack,
+      cwd,
+      model: sel.model,
+      timeoutMs: ctx.config.execution.agentTimeoutMs,
+      redactor: ctx.redactor,
+      signal: ctx.signal,
+      sliceId: slice.id,
+      attempt,
+      onOutput: (_stream, chunk) => {
+        if (outputLines >= 100) return;
+        for (const line of chunk.split('\n')) {
+          if (!line.trim() || outputLines >= 100) continue;
+          outputLines++;
+          // Defense in depth: redact even fake-provider output before it is stored.
+          ctx.emit({ type: 'AGENT_PROCESS_OUTPUT', source: 'process', sliceId: slice.id, attemptId, payload: { line: ctx.redactor.redact(line.slice(0, 500)) } });
+        }
+      },
+    });
+    ctx.emit({
+      type: 'AGENT_PROCESS_EXITED',
+      source: 'process',
+      sliceId: slice.id,
+      attemptId,
+      payload: { exitCode: result.exitCode, costUsd: result.costUsd ?? 0, tokens: result.tokens ?? 0, timedOut: result.timedOut },
+    });
+    last = result;
+    if (result.ok || result.blocker || ctx.signal.aborted) return result;
+    if (i < candidates.length - 1) {
+      ctx.logger.warn(`provider '${sel.provider}' failed for ${slice.id}; falling back to '${candidates[i + 1]!.provider}'`, { sliceId: slice.id });
+    }
+  }
+  return last!;
 }
 
 async function runVerification(ctx: ExecContext, slice: Slice, workRepo: GitRepo, attemptId: string): Promise<VerificationResult> {
@@ -261,26 +343,37 @@ async function maybeReview(
     return 'pass';
   }
   transition('REVIEWING');
-  ctx.emit({ type: 'REVIEW_STARTED', source: 'reviewer', sliceId: slice.id, attemptId, payload: { provider: sel.provider } });
   const diff = await workRepo.diffWithUntracked();
-  const outcome = await runReview({
-    adapter: ctx.registry.get(sel.provider),
-    model: sel.model,
-    slice,
-    diff,
-    cwd: workRepo.dir,
-    timeoutMs: ctx.config.execution.agentTimeoutMs,
-    redactor: ctx.redactor,
-    signal: ctx.signal,
-  });
-  ctx.emit({
-    type: 'REVIEW_FINISHED',
-    source: 'reviewer',
-    sliceId: slice.id,
-    attemptId,
-    payload: { verdict: outcome.verdict.verdict, malformed: outcome.malformed, findings: outcome.verdict.findings.length },
-  });
-  return outcome.verdict.verdict;
+  // Consensus: run N independent reviews (routing.reviewerConsensus) and require
+  // ALL to pass. A single 'blocked' is decisive and short-circuits the rest.
+  const count = Math.max(1, ctx.router.reviewerConsensusCount());
+  const verdicts: ReviewResolution[] = [];
+  for (let i = 0; i < count; i++) {
+    const rsel = ctx.router.reviewer(i) ?? sel;
+    ctx.emit({ type: 'REVIEW_STARTED', source: 'reviewer', sliceId: slice.id, attemptId, payload: { provider: rsel.provider, index: i, of: count } });
+    const outcome = await runReview({
+      adapter: ctx.registry.get(rsel.provider),
+      model: rsel.model,
+      slice,
+      diff,
+      cwd: workRepo.dir,
+      timeoutMs: ctx.config.execution.agentTimeoutMs,
+      redactor: ctx.redactor,
+      signal: ctx.signal,
+    });
+    ctx.emit({
+      type: 'REVIEW_FINISHED',
+      source: 'reviewer',
+      sliceId: slice.id,
+      attemptId,
+      payload: { verdict: outcome.verdict.verdict, malformed: outcome.malformed, findings: outcome.verdict.findings.length, index: i, of: count },
+    });
+    verdicts.push(outcome.verdict.verdict);
+    if (outcome.verdict.verdict === 'blocked') break;
+  }
+  if (verdicts.includes('blocked')) return 'blocked';
+  if (verdicts.includes('changes_requested')) return 'changes_requested';
+  return 'pass';
 }
 
 function reviewRequired(ctx: ExecContext, slice: Slice): boolean {

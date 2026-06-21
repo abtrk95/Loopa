@@ -12,7 +12,7 @@
  * to make the authoritative pass/fail decision.
  */
 import { lstatSync, readlinkSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 
 /** Convert a glob (supporting **, *, ?) to an anchored RegExp over posix paths. */
 export function globToRegExp(glob: string): RegExp {
@@ -130,8 +130,20 @@ export function structuralScan(
       } catch {
         // unreadable link
       }
-      const resolved = resolve(dir, target);
-      const escapes = rootReal !== undefined && !resolved.startsWith(rootReal + sep) && resolved !== rootReal;
+      // Anchor containment at the CANONICAL repo root and resolve the link target
+      // against the link's OWN directory. Mixing realpathSync(root) with a raw
+      // resolve(root, target) previously misclassified every in-tree link as an
+      // escape whenever the repo lived under a symlinked path (macOS /var, /tmp,
+      // synced homes) and resolved relative targets against the wrong base.
+      const base = rootReal ?? dir;
+      const linkDir = isAbsolute(target) ? base : join(base, dirname(rel));
+      let resolved = resolve(linkDir, target);
+      try {
+        resolved = realpathSync(resolved);
+      } catch {
+        // target may not exist yet — fall back to the lexical resolution
+      }
+      const escapes = !resolved.startsWith(base + sep) && resolved !== base;
       findings.push({
         kind: escapes ? 'symlink-escape' : 'symlink',
         path: rel,

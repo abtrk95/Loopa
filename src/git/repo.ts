@@ -36,11 +36,14 @@ export class GitRepo {
     return new GitRepo(dir, this.pm, this.redactor);
   }
 
-  private async git(args: string[], opts: { allowFail?: boolean; input?: string } = {}): Promise<RunResult> {
+  private async git(args: string[], opts: { allowFail?: boolean; input?: string; raw?: boolean } = {}): Promise<RunResult> {
     const res = await this.pm.run(['git', ...args], {
       cwd: this.dir,
       timeoutMs: 120_000,
-      ...(this.redactor ? { redactor: this.redactor } : {}),
+      // `raw` bypasses redaction for internal diff reads fed to deterministic secret
+      // scanners (redaction there would mask the very secrets we must detect). The raw
+      // text is consumed by pure scan functions and never persisted/displayed.
+      ...(opts.raw ? { noRedact: true } : this.redactor ? { redactor: this.redactor } : {}),
       ...(opts.input !== undefined ? { input: opts.input } : {}),
     });
     if (!res.ok && !opts.allowFail) {
@@ -131,18 +134,19 @@ export class GitRepo {
   }
 
   /** Unified diff of the working tree vs HEAD (tracked changes only). */
-  async diff(): Promise<string> {
-    const res = await this.git(['diff', 'HEAD'], { allowFail: true });
+  async diff(opts: { raw?: boolean } = {}): Promise<string> {
+    const res = await this.git(['diff', 'HEAD'], { allowFail: true, ...(opts.raw ? { raw: true } : {}) });
     return res.stdout;
   }
 
   /**
    * Diff including untracked (new) files, represented as synthetic add-only hunks.
    * Used by the verifier's content scans (secrets, test weakening) and the reviewer
-   * so brand-new files are never invisible to safety checks.
+   * so brand-new files are never invisible to safety checks. Pass `{ raw: true }` for
+   * the safety scans so secrets in tracked-file edits are not pre-masked by redaction.
    */
-  async diffWithUntracked(): Promise<string> {
-    let out = await this.diff();
+  async diffWithUntracked(opts: { raw?: boolean } = {}): Promise<string> {
+    let out = await this.diff(opts);
     const untracked = await this.git(['ls-files', '--others', '--exclude-standard'], { allowFail: true });
     if (!untracked.ok) return out;
     for (const rel of untracked.stdout.split('\n')) {
@@ -171,6 +175,21 @@ export class GitRepo {
 
   async checkout(ref: string): Promise<void> {
     await this.git(['checkout', ref]);
+  }
+
+  /** Force-delete a local branch (best effort; used to clear stale worktree branches). */
+  async deleteBranch(name: string): Promise<void> {
+    await this.git(['branch', '-D', name], { allowFail: true });
+  }
+
+  /** Local branch names matching a prefix (e.g. stale `aloop-wt/...` worktree branches). */
+  async listBranches(prefix = ''): Promise<string[]> {
+    const res = await this.git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { allowFail: true });
+    if (!res.ok) return [];
+    return res.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && (prefix === '' || l.startsWith(prefix)));
   }
 
   /** Stage ONLY the given paths and commit them. Returns the new commit sha. */
@@ -223,6 +242,56 @@ export class GitRepo {
       }
     }
     return undefined;
+  }
+
+  /** The git empty-tree object — used as a diff base for root commits. */
+  private static readonly EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+  /** Resolve the diff base for a commit: its first parent, or the empty tree. */
+  private async diffBase(sha: string): Promise<string> {
+    const res = await this.git(['rev-parse', '--verify', `${sha}^`], { allowFail: true });
+    return res.ok ? res.stdout.trim() : GitRepo.EMPTY_TREE;
+  }
+
+  /** Paths changed by a single commit (relative to its parent / the empty tree). */
+  async commitChangedPaths(sha: string): Promise<string[]> {
+    const base = await this.diffBase(sha);
+    const res = await this.git(['diff', '--name-only', base, sha], { allowFail: true, raw: true });
+    if (!res.ok) return [];
+    return res.stdout.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+  }
+
+  /** Unified diff introduced by a single commit (unredacted, for safety scanning). */
+  async commitDiff(sha: string): Promise<string> {
+    const base = await this.diffBase(sha);
+    const res = await this.git(['diff', base, sha], { allowFail: true, raw: true });
+    return res.ok ? res.stdout : '';
+  }
+
+  /** Added-line count introduced by a single commit. */
+  async commitAddedLines(sha: string): Promise<number> {
+    const base = await this.diffBase(sha);
+    const res = await this.git(['diff', '--numstat', base, sha], { allowFail: true, raw: true });
+    if (!res.ok) return 0;
+    let added = 0;
+    for (const line of res.stdout.split('\n')) {
+      const first = line.split('\t')[0];
+      if (first && first !== '-') added += Number(first) || 0;
+    }
+    return added;
+  }
+
+  /** Raw diff (`git diff --raw`) for a commit; exposes mode bits + change type. */
+  async commitRaw(sha: string): Promise<string> {
+    const base = await this.diffBase(sha);
+    const res = await this.git(['diff', '--raw', base, sha], { allowFail: true, raw: true });
+    return res.ok ? res.stdout : '';
+  }
+
+  /** Read a blob's content at a commit (e.g. a symlink's target text). */
+  async readBlobAtCommit(sha: string, path: string): Promise<string | undefined> {
+    const res = await this.git(['show', `${sha}:${path}`], { allowFail: true, raw: true });
+    return res.ok ? res.stdout : undefined;
   }
 
   // --- worktrees (parallel slice isolation) ---------------------------------

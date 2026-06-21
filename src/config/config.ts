@@ -35,7 +35,9 @@ export const RolesSchema = z
     workers: z.array(ProviderRefSchema).min(1).default([{ provider: 'fake', weight: 1, options: {} }]),
     reviewer: ProviderRefSchema.optional(),
     fixer: FixerRefSchema.default({ strategy: 'same-as-worker' }),
+    /** RESERVED / EXPERIMENTAL: accepted but not yet invoked by the orchestrator. */
     judge: ProviderRefSchema.optional(),
+    /** RESERVED / EXPERIMENTAL: the UI smoke adapter is not yet wired (see verify/browser.ts). */
     browser: ProviderRefSchema.optional(),
   })
   .strict();
