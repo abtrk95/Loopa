@@ -266,6 +266,7 @@ evidence-based assessment is in
 
 ## Documentation
 
+- [docs/best-practices.md](docs/best-practices.md) — **how it works + the operating playbook**: safe defaults, recommended workflows, do/don't, first-real-project checklist. Start here.
 - [docs/architecture.md](docs/architecture.md) — components, data flow, the 16 building blocks.
 - [docs/verification.md](docs/verification.md) — the deterministic verifier (the heart of the system).
 - [docs/state-machine.md](docs/state-machine.md) — run and slice state machines.
