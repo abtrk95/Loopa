@@ -70,6 +70,27 @@
 | draft PR behavior | default draft; `--no-draft` drops | PASS (hermetic + live draft) | github-pr.test |
 | duplicate prevention | dedupe by head | PASS (hermetic) | github-pr.test |
 
+## Non-technical PR review (NEW — this work stream)
+| Feature | Command | Expected | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| pr review (report gen) | `github pr review --repo o/n --pr N` | plain-English report from objective evidence | PASS (live; PR #11 → `.agent-loop/reports/pr-review-11.md`) + hermetic | pr-review.test |
+| pr explain (alias) | `github pr review`/`explain` | same report | PASS (dispatch alias) | github.ts |
+| plain-English summary | report `## Plain-English summary` | non-technical narrative incl. reviewer's product-owner layer | PASS (live: "A Search field was added…") | PR #11 report |
+| risk classification | report `Risk level` | Low/Medium/High from plan slice risk | PASS (live: High; hermetic high→NEEDS HUMAN DEV REVIEW) | pr-review.test |
+| manual checklist | report `## What you should manually check` | acceptance criteria + reviewer suggestions + screenshots | PASS (live: 9 steps incl. reviewer's "type acme") | PR #11 report |
+| screenshot linking | report `## Screenshots & browser evidence` | references real artifacts | PASS (live: 36 KB CDP PNG `S-001__root.png`) | PR #11 report |
+| verifier-fail → no SAFE | verdict ladder | fail/block never "SAFE TO REVIEW" | PASS (hermetic: verifier fail→DO NOT MERGE; secret/forbidden→BLOCKED) | pr-review.test |
+| AI reviewer cannot override verifier | verdict ladder | reviewer pass + verifier fail → DO NOT MERGE | PASS (hermetic explicit test) | pr-review.test |
+| no-evidence → no overclaim | `pr review --pr N` (no local run) | DO NOT MERGE / pr-metadata-only | PASS (live: empty dir → DO NOT MERGE) | Phase 9 neg-control |
+| evidence pack (event-sourced) | report built from event log | verifier/checks/review/browser/security/commits | PASS (live + hermetic extractEvidence) | pr-review.test |
+| PR comment dry-run | `pr review --pr N --comment` | preview, NO post | PASS (live: `[gh DRY-RUN] pr-comment`, nothing posted) | Phase 8 |
+| PR comment apply | `pr review --pr N --comment --apply` | posts report comment | PASS (live: 1 comment on PR #11) + hermetic gh-stub | pr-review.test / Phase 8 |
+| PR body human-review section | `run-issue --pr` / `pr update` body | verdict, checks, risk, manual checklist, no-auto-merge banner | PASS (live: PR #11 body; risk matches report) | PR #11 |
+| reviewer product-owner layer | `REVIEW_FINISHED` payload | plain-English whatChanged/matchesIntent/manualTest/risk/recommendation | PASS (live codex PO summary surfaced) + schema test | pr-review.test |
+| schema validation (PO summary) | `ProductOwnerSummarySchema` | rejects bad mergeRecommendation | PASS (hermetic) | pr-review.test |
+| secret redaction in report | `redactor.redact(report)` | known secret masked | PASS (hermetic) | pr-review.test |
+| triage bullet-list AC | `github triage` | `## Acceptance criteria` bullets count | PASS (live: #10 too-risky→ready) + regression test | github-triage.test |
+
 ## Verification / Safety (controlled fixtures — all PASS, Phase 10)
 | Control | Status | Evidence |
 | --- | --- | --- |

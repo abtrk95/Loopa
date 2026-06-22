@@ -108,9 +108,18 @@ agent-loop status
 | `providers` | List configured providers, detected versions, health. |
 | `inspect [<run-id>]` | Explain *why* a run/slice is in its current state, from evidence. |
 | `pr create [--push]` | Open a **draft** PR via `gh`. Never auto-merges or deploys. |
+| `github pr review --repo o/n --pr N [--comment --apply]` | **Plain-English, evidence-based PR review** for non-technical owners (verdict, checks, risk, manual checklist, screenshots). Read-only by default. See [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md). |
 | `demo` | Deterministic end-to-end demo in a throwaway repo. No API keys. |
 
 Full flags: `agent-loop --help`. Operational playbook: [docs/operations.md](docs/operations.md).
+
+> **Non-technical owner?** After a run opens a draft PR, get a plain-English review you
+> can trust — what changed, whether checks/tests/browser/security passed, the risk, and
+> exactly what to test by hand — with `agent-loop github pr review --repo o/n --pr N`.
+> The verdict (**SAFE TO REVIEW / NEEDS HUMAN DEV REVIEW / DO NOT MERGE / BLOCKED**) is
+> derived from objective evidence; the deterministic verifier is the authority and the AI
+> reviewer can never approve over a failed check. Nothing merges or deploys — a human
+> always decides. Guide: [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md).
 
 ## How it works (one paragraph)
 
@@ -190,6 +199,14 @@ hermetically).
   default to **dry-run**; polling is bounded (lock, max-iterations, idempotent); there is
   **no auto-merge, auto-deploy, or issue-close** path. See
   [docs/github-triage-kanban.md](docs/github-triage-kanban.md).
+- **Non-technical PR review** (`github pr review --repo o/n --pr N`): turns the objective
+  run record (deterministic verifier verdict, every safety scan, project checks, AI reviewer
+  findings + plain-English product-owner layer, browser screenshots, changed files, commits,
+  acceptance criteria) into a plain-English report with a clear verdict and a "what to test
+  by hand" checklist. The verifier is the authority — the AI reviewer can never approve over
+  a failed check, and a PR with no local run record never reads SAFE TO REVIEW. Read-only by
+  default; posts a PR comment only with `--comment --apply`. See
+  [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md).
 
 **Known limitations (honest):**
 
@@ -247,6 +264,7 @@ evidence-based assessment is in
 - [docs/interview-recommendations.md](docs/interview-recommendations.md) — per-question recommendations + agent/model orchestration questions, and the strengthen-only guarantees.
 - [docs/github-integration.md](docs/github-integration.md) — PR creation, what we never do.
 - [docs/github-triage-kanban.md](docs/github-triage-kanban.md) — issue triage, labels, Kanban sync, watch mode.
+- [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md) — **plain-English PR review for non-technical owners**: the verdicts, what still needs human judgement, the safe first-project workflow.
 - [docs/operations.md](docs/operations.md) — day-to-day operating playbook.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common failures and fixes.
 - [docs/reference-analysis.md](docs/reference-analysis.md) — what we learned from prior art.

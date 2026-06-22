@@ -166,7 +166,12 @@ config plus an optional capability predicate:
   times for consensus), or `roles.reviewers` — a panel of **distinct** provider+model
   refs, each run once for cross-model consensus. The panel takes precedence. All votes
   must pass; one `blocked` is decisive. Reviewers are advisory and can never override the
-  deterministic verifier.
+  deterministic verifier. A reviewer returns two layers: technical `findings`
+  (file/severity/description/requiredAction) **and** an optional plain-English
+  `productOwnerSummary` (whatChanged / matchesIntent / whatToManuallyTest / riskExplanation
+  / mergeRecommendation) — both schema-validated, both advisory. The product-owner layer is
+  surfaced by `github pr review` (see [nontechnical-pr-review.md](nontechnical-pr-review.md));
+  `mergeRecommendation` is advice only and never gates completion.
 - **worker** — chosen from `roles.workers` by `routing.workerStrategy`:
   - `static` — always the first capable worker.
   - `round-robin` — cycle through capable workers (default).

@@ -125,6 +125,12 @@ A reviewer `blocked` or `changes_requested` can stop or retry a slice, but a rev
 **cannot** turn a verifier `fail`/`block` into a pass — the verifier already returned
 before the reviewer is consulted, and the reviewer is only invoked on a verifier `pass`.
 
+This same authority order is what the non-technical PR review report
+(`github pr review`) presents to a product owner: the report's verdict is driven by the
+deterministic verifier first, and the AI reviewer can only add concerns — a verifier
+failure always yields **DO NOT MERGE / BLOCKED**, never SAFE TO REVIEW, regardless of what
+the reviewer says. See [nontechnical-pr-review.md](nontechnical-pr-review.md).
+
 ## Blocker reports
 
 When a slice is blocked (or exhausts retries), the executor writes

@@ -218,7 +218,8 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
     // locally this invocation, so a PR REQUIRES pushing it first: push by default and
     // let `--no-push` opt out (e.g. when the branch is already on the remote).
     if (flagBool(args, 'pr')) {
-      const snap = projectEvents(session.store.read(meta.runId));
+      const evts = session.store.read(meta.runId);
+      const snap = projectEvents(evts);
       const push = !flagBool(args, 'no-push');
       if (dryRun) {
         process.stderr.write(`  [gh DRY-RUN] pr upsert: ${push ? 'push + ' : ''}draft PR for ${meta.branch} (Refs #${issueNum})\n`);
@@ -232,6 +233,8 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
             push,
             sourceIssue: issueNum,
             plan: planned.plan,
+            events: evts,
+            browserArtifacts: listBrowserArtifacts(session.paths.uiSmokeDir, session.root),
             ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
           },
           snap,
@@ -406,7 +409,8 @@ async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
   if (!meta?.branch) throw new ControlError('no run branch found; plan/run first.');
   const store = new SqliteEventStore(session.paths.eventsDb);
   try {
-    const snap = projectEvents(store.read(meta.runId));
+    const evts = store.read(meta.runId);
+    const snap = projectEvents(evts);
     const issueNum = flagNum(args, 'issue');
     const plan = loadPlan(session.paths);
     const opts = {
@@ -415,6 +419,8 @@ async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
       remote: flagStr(args, 'remote') ?? cfg.remote,
       draft: !flagBool(args, 'no-draft') && cfg.draftPr,
       push: flagBool(args, 'push'),
+      events: evts,
+      browserArtifacts: listBrowserArtifacts(session.paths.uiSmokeDir, session.root),
       ...(issueNum !== undefined ? { sourceIssue: issueNum } : {}),
       ...(plan ? { plan } : {}),
       ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
@@ -488,6 +494,7 @@ async function githubPrReview(session: Session, args: ParsedArgs): Promise<numbe
 
   const browserArtifacts = listBrowserArtifacts(session.paths.uiSmokeDir, session.root);
   const sourceIssue = flagNum(args, 'issue') ?? sourceIssueFromPlan(plan);
+  const branchMismatch = !!pr && !!snap.branch && !!pr.headRefName && snap.branch !== pr.headRefName;
   const report = buildPrReview({
     events,
     snapshot: snap,
@@ -495,6 +502,7 @@ async function githubPrReview(session: Session, args: ParsedArgs): Promise<numbe
     ...(sourceIssue !== undefined ? { sourceIssue } : {}),
     browserArtifacts,
     ...(pr ? { pr } : {}),
+    branchMismatch,
   });
   const md = session.redactor.redact(renderPrReviewMarkdown(report));
 

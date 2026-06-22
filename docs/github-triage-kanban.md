@@ -159,9 +159,34 @@ Safety properties:
 - **No push** unless `--push`; **no merge**; **no deploy**.
 - **Upsert, not duplicate**: `pr update` (and `run-issue --pr`) edit the existing PR for
   the branch, or create one if none exists.
-- The body reports **verified** progress, the slice list with commit shas, the checks
-  run, any blockers, and links the source issue with `Refs #N` (a reference — **not**
-  `Closes`, so merging never auto-closes the issue).
+- The body **leads with a plain-English, non-technical human-review section** (verdict,
+  checks, risk, a "what to test by hand" checklist, and an explicit *"No auto-merge was
+  performed. Human review is required"* banner), then a collapsible technical section with
+  verified progress, the slice list with commit shas, the checks run, and any blockers. It
+  links the source issue with `Refs #N` (a reference — **not** `Closes`, so merging never
+  auto-closes the issue).
+
+## Plain-English PR review (for non-technical owners)
+
+```bash
+# Read-only: writes .agent-loop/reports/pr-review-<N>.md and prints a verdict.
+agent-loop github pr review --repo owner/name --pr 7
+# Also post it as a PR comment (a write — needs --apply, like every other write):
+agent-loop github pr review --repo owner/name --pr 7 --comment --apply
+```
+
+Builds an **evidence-first** report from the objective run record — the deterministic
+verifier verdict, every safety scan, the project's checks, the AI reviewer's findings +
+plain-English product-owner layer, browser screenshots, changed files, commits, and the
+issue's acceptance criteria. The verdict is one of **SAFE TO REVIEW / NEEDS HUMAN DEV
+REVIEW / DO NOT MERGE / BLOCKED**; the verifier is the authority, so an approving AI
+reviewer can never upgrade a verifier failure, and a PR with no local run record never
+reads SAFE TO REVIEW. Full guide: [nontechnical-pr-review.md](nontechnical-pr-review.md).
+
+> **Triage tip.** Triage recognizes acceptance criteria written as GitHub task-list
+> checkboxes (`- [ ] …`) **and** as plain bullet points under an "Acceptance criteria"
+> (or "Requirements" / "Definition of done") heading — the most common format. Issues with
+> clear criteria classify as `ready`; vague ones get clarification questions.
 
 ## Safety summary
 

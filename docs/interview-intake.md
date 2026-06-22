@@ -154,6 +154,11 @@ forbidden area, remove a check, or downgrade risk.**
   lowers risk, never removes a check, and never widens scope into a forbidden area.
 - It does **not** set auto-merge/deploy (there is no such path anywhere in agent-loop).
 
+The interview is the **front** of the safe non-technical workflow (clarify intake →
+strengthen-only orchestration → run → draft PR → **plain-English PR review**). When the
+work lands as a draft PR, [nontechnical-pr-review.md](nontechnical-pr-review.md) explains
+how a non-technical owner reads the evidence-based verdict and decides whether to merge.
+
 ## Tests
 
 `test/unit/interview.test.ts` covers: quick/standard/strict selection, interactive

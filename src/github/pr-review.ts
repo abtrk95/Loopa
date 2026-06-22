@@ -37,19 +37,23 @@ export interface CheckRow {
   id: string;
   label: string;
   ok: boolean | undefined;
+  /** True when the verifier SKIPPED this check (e.g. not in allowedCommands) — it did
+   * NOT actually run, so it must never be reported as a pass. */
+  skipped?: boolean;
 }
 
+/**
+ * Tri-state safety guards. `true` = ran and clean; `false` = ran and failed (or a
+ * blocker named it); `undefined` = NO evidence it ran (e.g. the scan was disabled in
+ * config, so it emitted no event). `undefined` must NEVER be rendered as a pass — that
+ * is exactly the overclaim a non-technical owner must not be shown.
+ */
 export interface SecurityEvidence {
-  /** true = clean (no potential secret in any committed diff). */
-  secrets: boolean;
-  /** true = clean (no forbidden or out-of-scope path was committed). */
-  forbiddenPaths: boolean;
-  /** true = clean (no write under .git, no path traversal, no symlink escape). */
-  protectedFiles: boolean;
-  /** true = clean (no tests deleted/weakened). */
-  testIntegrity: boolean;
-  /** true = clean (no unresolved merge-conflict markers). */
-  mergeMarkers: boolean;
+  secrets: boolean | undefined;
+  forbiddenPaths: boolean | undefined;
+  protectedFiles: boolean | undefined;
+  testIntegrity: boolean | undefined;
+  mergeMarkers: boolean | undefined;
   /** A dependency lockfile was changed (informational, not a failure). */
   lockfileChanged: boolean;
 }
@@ -94,6 +98,9 @@ export interface PrEvidence {
   verifiedCompleted: number;
   slices: SliceEvidence[];
   checks: CheckRow[];
+  /** Configured checks that the verifier SKIPPED (e.g. not in allowedCommands) — they
+   * did not actually run and must not be counted as passing. */
+  skippedChecks: string[];
   security: SecurityEvidence;
   review?: ReviewEvidence;
   browser?: BrowserEvidence;
@@ -105,6 +112,9 @@ export interface PrEvidence {
   costUsd: number;
   tokens: number;
   pr?: PrMeta;
+  /** The local run evidence does NOT correspond to the PR (head branch mismatch), so it
+   * cannot be trusted to describe this PR's changes. */
+  branchMismatch: boolean;
 }
 
 export interface PrReviewReport {
@@ -140,6 +150,9 @@ export interface ExtractInput {
   sourceIssue?: number | undefined;
   browserArtifacts?: string[];
   pr?: PrMeta | undefined;
+  /** Set when the PR's head branch does not match the local run branch — the local
+   * evidence may belong to a different change and must not be trusted as SAFE. */
+  branchMismatch?: boolean | undefined;
 }
 
 /** Build the full objective evidence pack from a local run's event log. */
@@ -147,9 +160,12 @@ export function extractEvidence(input: ExtractInput): PrEvidence {
   const { events, snapshot: snap, plan } = input;
   const planSlices = new Map((plan?.slices ?? []).map((s) => [s.id, s]));
 
-  // Last-wins per check id (a later attempt's result supersedes an earlier one,
-  // so a check that failed then passed reflects the committed/final state).
+  // Last-wins per check id (a later attempt's result supersedes an earlier one, so a
+  // check that failed then passed reflects the FINAL committed state — which is what a
+  // merge decision needs). Earlier auto-recovered failures are intentionally not shown
+  // as failures; the blocker/verifier failure surfaces any UNrecovered problem.
   const checkOk = new Map<string, boolean>();
+  const checkSummary = new Map<string, string>();
   const commits: Array<{ sha: string; message: string }> = [];
   const committedFiles = new Set<string>();
   const reviewEvents: Array<Record<string, unknown>> = [];
@@ -162,7 +178,11 @@ export function extractEvidence(input: ExtractInput): PrEvidence {
     switch (ev.type) {
       case 'CHECK_FINISHED': {
         const id = str(p, 'checkId') ?? str(p, 'id');
-        if (id) checkOk.set(id, p['ok'] === true);
+        if (id) {
+          checkOk.set(id, p['ok'] === true);
+          const sum = str(p, 'summary');
+          if (sum) checkSummary.set(id, sum);
+        }
         break;
       }
       case 'COMMIT_CREATED': {
@@ -187,8 +207,9 @@ export function extractEvidence(input: ExtractInput): PrEvidence {
     }
   }
 
-  const security = extractSecurity(checkOk, snap, blockerReason);
-  const checks = extractCommandChecks(checkOk, plan);
+  const security = extractSecurity(checkOk, blockerReason, false, snap.changedFiles);
+  const checks = extractCommandChecks(checkOk, checkSummary, plan);
+  const skippedChecks = checks.filter((c) => c.skipped).map((c) => c.id);
   const review = reviewEvents.length ? aggregateReview(reviewEvents) : undefined;
   const browser = browserEvents.length ? aggregateBrowser(browserEvents, input.browserArtifacts ?? []) : undefined;
 
@@ -227,6 +248,7 @@ export function extractEvidence(input: ExtractInput): PrEvidence {
     verifiedCompleted: snap.verifiedCompleted,
     slices,
     checks,
+    skippedChecks,
     security,
     ...(review ? { review } : {}),
     ...(browser ? { browser } : {}),
@@ -238,32 +260,47 @@ export function extractEvidence(input: ExtractInput): PrEvidence {
     costUsd: snap.costUsd,
     tokens: snap.tokens,
     ...(input.pr ? { pr: input.pr } : {}),
+    branchMismatch: input.branchMismatch === true,
   };
 }
 
-function extractSecurity(checkOk: Map<string, boolean>, snap: RunSnapshot, blockerReason: string | undefined): SecurityEvidence {
-  // A scan that never produced an event but whose run COMPLETED must have passed
-  // (the verifier only commits code that cleared every safety scan). So a missing
-  // event defaults to "clean"; a present event uses its result; and the blocker
-  // reason is an additional hard signal when the run did NOT complete.
+function extractSecurity(
+  checkOk: Map<string, boolean>,
+  blockerReason: string | undefined,
+  assumePassOnMissing: boolean,
+  changedFiles: string[] = [],
+): SecurityEvidence {
   const blockedBy = (re: RegExp): boolean => blockerReason !== undefined && re.test(blockerReason);
+  // Tri-state guard: a present CHECK_FINISHED event is authoritative; a blocker reason is
+  // a hard fail; otherwise the scan left no evidence it ran. We only assume "clean on
+  // missing" for the snapshot fallback (which structurally cannot carry safety-scan
+  // events) — the event-based path reports `undefined` ("not checked") so a config that
+  // DISABLED a scan (e.g. detectSecrets:false → no event) is never shown as a pass.
+  const guard = (id: string, re: RegExp): boolean | undefined => {
+    if (blockedBy(re)) return false;
+    if (checkOk.has(id)) return checkOk.get(id)!;
+    return assumePassOnMissing ? true : undefined;
+  };
   return {
-    secrets: (checkOk.get('secrets') ?? true) && !blockedBy(/secret/i),
-    forbiddenPaths: (checkOk.get('scope') ?? true) && !blockedBy(/forbidden|out-of-scope|scope/i),
-    protectedFiles: (checkOk.get('structural') ?? true) && !blockedBy(/\.git|git-internal|traversal|symlink/i),
-    testIntegrity: (checkOk.get('test-weakening') ?? true) && !blockedBy(/weaken/i),
-    mergeMarkers: (checkOk.get('merge-conflict') ?? true) && !blockedBy(/conflict/i),
-    lockfileChanged: snap.changedFiles.some((f) => /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|go\.sum|composer\.lock|poetry\.lock)$/.test(f)),
+    secrets: guard('secrets', /secret/i),
+    forbiddenPaths: guard('scope', /forbidden|out-of-scope|scope/i),
+    protectedFiles: guard('structural', /\.git|git-internal|traversal|symlink/i),
+    testIntegrity: guard('test-weakening', /weaken/i),
+    mergeMarkers: guard('merge-conflict', /conflict/i),
+    lockfileChanged: changedFiles.some((f) => /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|go\.sum|composer\.lock|poetry\.lock)$/.test(f)),
   };
 }
 
-function extractCommandChecks(checkOk: Map<string, boolean>, plan?: Plan): CheckRow[] {
+function extractCommandChecks(checkOk: Map<string, boolean>, checkSummary: Map<string, string>, plan?: Plan): CheckRow[] {
   const rows: CheckRow[] = [];
   const planById = new Map((plan?.verification ?? []).map((c) => [c.id, c]));
   for (const [id, ok] of checkOk) {
     if (SECURITY_CHECK_IDS.has(id)) continue; // shown in the security panel
     const cat = planById.get(id)?.category;
-    rows.push({ id, label: friendlyCheckLabel(id, cat), ok });
+    // A check the verifier SKIPPED (e.g. not in allowedCommands) is recorded with ok=true
+    // and a "skipped …" summary — it did NOT run, so report it as not-run, never a pass.
+    const skipped = /skip/i.test(checkSummary.get(id) ?? '');
+    rows.push({ id, label: friendlyCheckLabel(id, cat), ok: skipped ? undefined : ok, ...(skipped ? { skipped: true } : {}) });
   }
   return rows;
 }
@@ -331,23 +368,42 @@ function highestRisk(risks: Risk[]): Risk {
   return 'low';
 }
 
+/** The safety guards as labelled, tri-state values (for verdict + rendering). */
+function sec(e: PrEvidence): Array<{ label: string; value: boolean | undefined }> {
+  return [
+    { label: 'Secrets / credentials', value: e.security.secrets },
+    { label: 'Forbidden / out-of-scope files', value: e.security.forbiddenPaths },
+    { label: 'Protected locations (.git, symlinks)', value: e.security.protectedFiles },
+    { label: 'Tests not weakened', value: e.security.testIntegrity },
+    { label: 'No merge-conflict markers', value: e.security.mergeMarkers },
+  ];
+}
+
+function hasUiFiles(files: string[]): boolean {
+  return files.some((f) => /\.(tsx|jsx|vue|svelte|css|scss|sass|less|html)$/.test(f));
+}
+
 // --- verdict (authority order enforced here) ---------------------------------
 
 export function decidePrVerdict(e: PrEvidence): { verdict: PrVerdict; riskLevel: RiskLevel; recommendation: string; reasons: string[]; concerns: string[] } {
   const reasons: string[] = [];
   const concerns: string[] = [];
 
-  const securityFail = !e.security.secrets || !e.security.forbiddenPaths || !e.security.protectedFiles || !e.security.testIntegrity || !e.security.mergeMarkers;
+  // A guard === false means it RAN and FAILED (strongest negative). A guard ===
+  // undefined means there is NO evidence it ran (e.g. the scan was disabled in config)
+  // — that is a gap, not a pass.
+  const securityFail = sec(e).some((g) => g.value === false);
+  const securityUnknown = sec(e).filter((g) => g.value === undefined);
   const verifierClean = e.runState === 'COMPLETED' && e.verifiedCompleted === e.totalSlices && e.totalSlices > 0 && !e.blocker;
   const requiredBrowserFailed = !!e.browser?.ran && !e.browser.ok && e.browser.required;
 
   // 1) Hard safety / hard verifier block — the strongest negative.
   if (securityFail || e.blocker?.hard || requiredBrowserFailed) {
-    if (!e.security.secrets) reasons.push('A potential secret/credential was detected in the changes — must not be merged.');
-    if (!e.security.forbiddenPaths) reasons.push('A protected/forbidden file (e.g. .env, secrets, production infra) was touched.');
-    if (!e.security.protectedFiles) reasons.push('A protected location (.git internals / symlink escape / path traversal) was touched.');
-    if (!e.security.testIntegrity) reasons.push('Existing tests appear to have been deleted or weakened.');
-    if (!e.security.mergeMarkers) reasons.push('Unresolved merge-conflict markers are present in the changes.');
+    if (e.security.secrets === false) reasons.push('A potential secret/credential was detected in the changes — must not be merged.');
+    if (e.security.forbiddenPaths === false) reasons.push('A protected/forbidden file (e.g. .env, secrets, production infra) was touched.');
+    if (e.security.protectedFiles === false) reasons.push('A protected location (.git internals / symlink escape / path traversal) was touched.');
+    if (e.security.testIntegrity === false) reasons.push('Existing tests appear to have been deleted or weakened.');
+    if (e.security.mergeMarkers === false) reasons.push('Unresolved merge-conflict markers are present in the changes.');
     if (requiredBrowserFailed) reasons.push('A REQUIRED browser/UI check did not pass.');
     if (e.blocker?.hard && reasons.length === 0) reasons.push(`The run was hard-blocked: ${e.blocker.reason}`);
     return { verdict: 'BLOCKED', riskLevel: 'High', recommendation: 'Do not merge.', reasons, concerns };
@@ -376,10 +432,14 @@ export function decidePrVerdict(e: PrEvidence): { verdict: PrVerdict; riskLevel:
 
   // 4) Verifier clean, but signals that warrant a developer's eyes.
   if (!e.hasLocalRun) concerns.push('No local verification record was found — automated checks could not be confirmed from this machine.');
+  if (e.branchMismatch) concerns.push('The local run does not match this PR’s branch — the checks may describe a different change.');
+  for (const g of securityUnknown) concerns.push(`The “${g.label}” safety scan has no evidence it ran (it may be disabled in config) — do not assume it passed.`);
+  if (e.skippedChecks.length > 0) concerns.push(`Configured check(s) were skipped (not run): ${e.skippedChecks.join(', ')}.`);
   if (e.review?.verdict === 'changes_requested') concerns.push('The AI reviewer requested changes (advisory).');
   if (e.review && e.review.criticalOrHigh > 0) concerns.push(`The AI reviewer raised ${e.review.criticalOrHigh} higher-severity note(s).`);
   if (e.review?.malformed) concerns.push('The AI reviewer’s output could not be fully parsed (treated as an advisory pass).');
   if (e.browser?.ran && !e.browser.ok) concerns.push('An advisory browser/UI check did not fully pass (it does not block, but worth a look).');
+  if (!e.browser?.ran && hasUiFiles(e.changedFiles)) concerns.push('User-interface files changed but no browser/UI check ran — open the screen and confirm it looks right.');
   if (e.maxRisk === 'high') concerns.push('This change touches areas marked HIGH risk.');
   if (e.security.lockfileChanged) concerns.push('A dependency lockfile changed — confirm the dependency change was intended.');
   if (e.assumptions.length > 0) concerns.push(`${e.assumptions.length} assumption(s) were recorded while building — confirm they hold.`);
@@ -387,16 +447,21 @@ export function decidePrVerdict(e: PrEvidence): { verdict: PrVerdict; riskLevel:
 
   const riskLevel: RiskLevel = e.maxRisk === 'high' ? 'High' : e.maxRisk === 'medium' ? 'Medium' : 'Low';
 
-  // A developer should look when there are real concerns, or the change is high-risk,
-  // or there is no local verification record to stand on, or a (advisory) browser
-  // check actually failed (the UI may be visibly broken).
+  // A developer should look when there are real concerns, or the change is high-risk, or
+  // there is no trustworthy local verification record, or a (advisory) browser check
+  // actually failed, or a safety scan / configured check did not actually run.
   const advisoryBrowserFailed = !!e.browser?.ran && !e.browser.ok;
+  const uiUnverified = !e.browser?.ran && hasUiFiles(e.changedFiles);
   const needsDev =
     e.maxRisk === 'high' ||
     !e.hasLocalRun ||
+    e.branchMismatch ||
+    securityUnknown.length > 0 ||
+    e.skippedChecks.length > 0 ||
     e.review?.verdict === 'changes_requested' ||
     (e.review?.criticalOrHigh ?? 0) > 0 ||
-    advisoryBrowserFailed;
+    advisoryBrowserFailed ||
+    uiUnverified;
   if (needsDev) {
     if (reasons.length === 0) reasons.push('Automatic checks passed, but this change has signals a developer should confirm before merge.');
     return { verdict: 'NEEDS HUMAN DEV REVIEW', riskLevel, recommendation: 'Ask a developer to review before merging.', reasons, concerns };
@@ -449,7 +514,11 @@ export function evidenceFromSnapshot(snap: RunSnapshot, opts: { plan?: Plan | un
   const planSlices = new Map((opts.plan?.slices ?? []).map((s) => [s.id, s]));
   const checks: CheckRow[] = snap.checks.map((c) => ({ id: c.id, label: friendlyCheckLabel(c.id, undefined), ok: c.state === 'passed' ? true : c.state === 'failed' ? false : undefined }));
   const blockerReason = snap.blocker?.reason;
-  const security = extractSecurity(new Map(), snap, blockerReason);
+  // Snapshot fallback only: the projection structurally cannot carry the safety-scan
+  // events, so for a COMPLETED run we assume the scans that gate a commit passed. The
+  // event-based path (the authoritative report and, via FIX-from-events, the PR body)
+  // does NOT make this assumption.
+  const security = extractSecurity(new Map(), blockerReason, snap.runState === 'COMPLETED', snap.changedFiles);
   const slices: SliceEvidence[] = snap.sliceOrder.map((id) => {
     const sv = snap.slices[id];
     const ps = planSlices.get(id);
@@ -474,6 +543,7 @@ export function evidenceFromSnapshot(snap: RunSnapshot, opts: { plan?: Plan | un
     verifiedCompleted: snap.verifiedCompleted,
     slices,
     checks,
+    skippedChecks: [],
     security,
     changedFiles: [...snap.changedFiles].sort(),
     commits: snap.lastCommit ? [snap.lastCommit] : [],
@@ -482,12 +552,19 @@ export function evidenceFromSnapshot(snap: RunSnapshot, opts: { plan?: Plan | un
     maxRisk: highestRisk((opts.plan?.slices ?? []).map((s) => s.risk)),
     costUsd: snap.costUsd,
     tokens: snap.tokens,
+    branchMismatch: false,
   };
 }
 
-/** A concise, non-technical human-review block embedded in the draft-PR body. */
+/** A concise, non-technical human-review block embedded in the draft-PR body. Built
+ * from a snapshot (fallback). Prefer `renderHumanReviewFromEvidence` with the full event
+ * log so the body's verdict/risk match the `pr review` report exactly. */
 export function renderHumanReviewSection(snap: RunSnapshot, opts: { plan?: Plan | undefined; sourceIssue?: number | undefined } = {}): string {
-  const e = evidenceFromSnapshot(snap, opts);
+  return renderHumanReviewFromEvidence(evidenceFromSnapshot(snap, opts));
+}
+
+/** A concise, non-technical human-review block built from full evidence. */
+export function renderHumanReviewFromEvidence(e: PrEvidence): string {
   const decision = decidePrVerdict(e);
   const manual = buildManualChecks(e);
   const rows = namedCheckRows(e);
@@ -502,7 +579,8 @@ export function renderHumanReviewSection(snap: RunSnapshot, opts: { plan?: Plan 
   L.push('');
   L.push(`**Verification:** ${e.verifiedCompleted}/${e.totalSlices} pieces verified · ` + rows.map((r) => `${r.label} ${r.ok === undefined ? '—' : r.ok ? '✅' : '❌'}`).join(' · '));
   L.push('');
-  L.push(`**Security:** secrets ${e.security.secrets ? '✅' : '❌'} · forbidden files ${e.security.forbiddenPaths ? '✅' : '❌'} · protected locations ${e.security.protectedFiles ? '✅' : '❌'}`);
+  const mk = (v: boolean | undefined): string => (v === undefined ? '⚠️' : v ? '✅' : '❌');
+  L.push(`**Security:** secrets ${mk(e.security.secrets)} · forbidden files ${mk(e.security.forbiddenPaths)} · protected locations ${mk(e.security.protectedFiles)}`);
   L.push('');
   L.push(`**You should manually check before merging:**`);
   manual.slice(0, 8).forEach((c, i) => L.push(`${i + 1}. ${c}`));
@@ -557,6 +635,8 @@ const VERDICT_BADGE: Record<PrVerdict, string> = {
 };
 
 const CHECK_MARK = (ok: boolean | undefined): string => (ok === undefined ? '— not run' : ok ? '✅ PASS' : '❌ FAIL');
+/** Safety guards: `undefined` is a GAP (scan left no evidence it ran), not a pass. */
+const SAFETY_MARK = (ok: boolean | undefined): string => (ok === undefined ? '⚠️ NOT CHECKED' : ok ? '✅ PASS' : '❌ FAIL');
 
 /** Render the full plain-English report. Caller is responsible for redaction. */
 export function renderPrReviewMarkdown(report: PrReviewReport): string {
@@ -617,11 +697,7 @@ export function renderPrReviewMarkdown(report: PrReviewReport): string {
   L.push('');
   L.push(`| Guard | Result |`);
   L.push(`| --- | --- |`);
-  L.push(`| Secrets / credentials | ${CHECK_MARK(e.security.secrets)} |`);
-  L.push(`| Forbidden / out-of-scope files | ${CHECK_MARK(e.security.forbiddenPaths)} |`);
-  L.push(`| Protected locations (.git, symlinks) | ${CHECK_MARK(e.security.protectedFiles)} |`);
-  L.push(`| Tests not weakened | ${CHECK_MARK(e.security.testIntegrity)} |`);
-  L.push(`| No merge-conflict markers | ${CHECK_MARK(e.security.mergeMarkers)} |`);
+  for (const g of sec(e)) L.push(`| ${g.label} | ${SAFETY_MARK(g.value)} |`);
   if (e.security.lockfileChanged) L.push(`| Dependency lockfile | ⚠️ changed (confirm intended) |`);
   L.push('');
 

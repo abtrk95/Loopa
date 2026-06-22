@@ -138,6 +138,14 @@ Orchestration (verifier remains authoritative; AI roles can never override it):
   (out-of-scope edits, secrets, failed checks, forbidden-path writes). See
   `docs/provider-adapters.md` and `docs/verification.md`.
 
+## See also
+
+Picking a **distinct reviewer** provider here (e.g. `codex` while workers run `claude`)
+is what makes the non-technical PR review report's plain-English product-owner layer most
+useful — an independent second model's read of the change is surfaced in
+[nontechnical-pr-review.md](nontechnical-pr-review.md). The reviewer stays advisory; the
+deterministic verifier remains the completion authority.
+
 ## Tests
 
 - `test/unit/recommend.test.ts` — the pure engine: signal heuristics, per-question

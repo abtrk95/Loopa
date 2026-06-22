@@ -90,6 +90,9 @@ function completedRunEvents(opts: { reviewer?: 'pass' | 'changes_requested' | 'b
     ev('CHECK_FINISHED', { checkId: 'scope', ok: true }, 'S-001'),
     ev('CHECK_FINISHED', { checkId: 'secrets', ok: true }, 'S-001'),
     ev('CHECK_FINISHED', { checkId: 'structural', ok: true }, 'S-001'),
+    ev('CHECK_FINISHED', { checkId: 'test-weakening', ok: true }, 'S-001'),
+    ev('CHECK_FINISHED', { checkId: 'merge-conflict', ok: true }, 'S-001'),
+    ev('CHECK_FINISHED', { checkId: 'diff-size', ok: true }, 'S-001'),
     ev('CHECK_FINISHED', { checkId: 'test', ok: true }, 'S-001'),
     ev('VERIFICATION_PASSED', { addedLines: 20, files: 2 }, 'S-001'),
   ];
@@ -126,6 +129,7 @@ function baseEvidence(over: Partial<PrEvidence> = {}): PrEvidence {
     verifiedCompleted: 1,
     slices: [{ id: 'S-001', title: 't', state: 'COMPLETED', risk: 'low', acceptanceCriteria: ['does a thing'] }],
     checks: [{ id: 'test', label: 'Tests', ok: true }],
+    skippedChecks: [],
     security: { secrets: true, forbiddenPaths: true, protectedFiles: true, testIntegrity: true, mergeMarkers: true, lockfileChanged: false },
     changedFiles: ['src/a.ts'],
     commits: [{ sha: 'deadbeef', message: 'S-001 x' }],
@@ -133,6 +137,7 @@ function baseEvidence(over: Partial<PrEvidence> = {}): PrEvidence {
     maxRisk: 'low',
     costUsd: 0,
     tokens: 0,
+    branchMismatch: false,
     ...over,
   };
 }
@@ -198,6 +203,32 @@ describe('decidePrVerdict — verifier is the final authority', () => {
   it('no local run record → never SAFE TO REVIEW', () => {
     const d = decidePrVerdict(baseEvidence({ hasLocalRun: false, runState: 'CREATED', verifiedCompleted: 0, totalSlices: 0 }));
     expect(d.verdict).not.toBe('SAFE TO REVIEW');
+  });
+
+  // --- adversarial-audit hardening regressions ---
+  it('a safety scan with NO evidence it ran (undefined) → never SAFE TO REVIEW', () => {
+    // e.g. detectSecrets disabled in config → no secrets event → must NOT be shown as pass.
+    const d = decidePrVerdict(baseEvidence({ security: { secrets: undefined, forbiddenPaths: true, protectedFiles: true, testIntegrity: true, mergeMarkers: true, lockfileChanged: false } }));
+    expect(d.verdict).toBe('NEEDS HUMAN DEV REVIEW');
+    expect(d.concerns.join(' ')).toMatch(/no evidence it ran|disabled/i);
+  });
+
+  it('a SKIPPED check (allowedCommands) → never SAFE TO REVIEW', () => {
+    const d = decidePrVerdict(baseEvidence({ skippedChecks: ['test'], checks: [{ id: 'test', label: 'Tests', ok: undefined, skipped: true }] }));
+    expect(d.verdict).toBe('NEEDS HUMAN DEV REVIEW');
+    expect(d.concerns.join(' ')).toMatch(/skipped/i);
+  });
+
+  it('PR branch does not match the local run → never SAFE TO REVIEW', () => {
+    const d = decidePrVerdict(baseEvidence({ branchMismatch: true }));
+    expect(d.verdict).toBe('NEEDS HUMAN DEV REVIEW');
+    expect(d.concerns.join(' ')).toMatch(/does not match this PR/i);
+  });
+
+  it('UI files changed but no browser check ran → flagged for review', () => {
+    const d = decidePrVerdict(baseEvidence({ changedFiles: ['src/App.tsx'] }));
+    expect(d.verdict).toBe('NEEDS HUMAN DEV REVIEW');
+    expect(d.concerns.join(' ')).toMatch(/no browser\/UI check ran/i);
   });
 });
 
@@ -276,6 +307,56 @@ describe('buildPrReview / renderPrReviewMarkdown', () => {
     expect(md).toContain('S-001__root.png');
     expect(md).toContain('## Screenshots & browser evidence');
     expect(report.manualChecks.some((c) => c.includes('S-001__root.png'))).toBe(true);
+  });
+});
+
+// --- adversarial-audit: no overclaim in extraction/rendering -----------------
+
+describe('extraction never overclaims a check that did not actually run', () => {
+  it('a SKIPPED command check (allowedCommands) is reported as not-run, never PASS', () => {
+    seq = 0;
+    const events: AgentLoopEvent[] = [
+      ev('PLAN_CREATED', { planId: 'plan-1', goal: 'g', branch: 'b', totalSlices: 1, sliceIds: ['S-001'], sliceTitles: { 'S-001': 's' } }),
+      ev('RUN_STARTED', { branch: 'b' }, undefined),
+      ev('SLICE_STARTED', {}, 'S-001'),
+      ev('FILE_CHANGED', { files: ['src/a.ts'] }, 'S-001'),
+      ev('CHECK_FINISHED', { checkId: 'scope', ok: true }, 'S-001'),
+      ev('CHECK_FINISHED', { checkId: 'secrets', ok: true }, 'S-001'),
+      // verifier records a skipped check with ok=true + a "skipped …" summary:
+      ev('CHECK_FINISHED', { checkId: 'test', ok: true, summary: 'skipped (not in allowedCommands)' }, 'S-001'),
+      ev('COMMIT_CREATED', { sha: 'abc1234567', message: 'S-001 x', files: ['src/a.ts'] }, 'S-001'),
+      ev('SLICE_COMPLETED', { sha: 'abc1234567' }, 'S-001'),
+      ev('RUN_COMPLETED', {}),
+    ];
+    const e = extractEvidence({ events, snapshot: project(events), plan: mkPlan() });
+    expect(e.skippedChecks).toContain('test');
+    const testRow = e.checks.find((c) => c.id === 'test');
+    expect(testRow?.skipped).toBe(true);
+    expect(testRow?.ok).toBeUndefined(); // NOT true → never rendered as PASS
+    const report = buildPrReview({ events, snapshot: project(events), plan: mkPlan() });
+    expect(report.verdict).toBe('NEEDS HUMAN DEV REVIEW');
+  });
+
+  it('a disabled secrets scan (no secrets event) is reported as NOT CHECKED, never PASS', () => {
+    seq = 0;
+    const events: AgentLoopEvent[] = [
+      ev('PLAN_CREATED', { planId: 'plan-1', goal: 'g', branch: 'b', totalSlices: 1, sliceIds: ['S-001'], sliceTitles: { 'S-001': 's' } }),
+      ev('RUN_STARTED', { branch: 'b' }, undefined),
+      ev('SLICE_STARTED', {}, 'S-001'),
+      ev('FILE_CHANGED', { files: ['src/a.ts'] }, 'S-001'),
+      ev('CHECK_FINISHED', { checkId: 'scope', ok: true }, 'S-001'),
+      ev('CHECK_FINISHED', { checkId: 'structural', ok: true }, 'S-001'),
+      // NO 'secrets' CHECK_FINISHED — detectSecrets was disabled in config.
+      ev('CHECK_FINISHED', { checkId: 'test', ok: true }, 'S-001'),
+      ev('COMMIT_CREATED', { sha: 'abc1234567', message: 'S-001 x', files: ['src/a.ts'] }, 'S-001'),
+      ev('SLICE_COMPLETED', { sha: 'abc1234567' }, 'S-001'),
+      ev('RUN_COMPLETED', {}),
+    ];
+    const e = extractEvidence({ events, snapshot: project(events), plan: mkPlan() });
+    expect(e.security.secrets).toBeUndefined(); // not assumed-pass
+    const md = renderPrReviewMarkdown(buildPrReview({ events, snapshot: project(events), plan: mkPlan() }));
+    expect(md).toContain('NOT CHECKED');
+    expect(buildPrReview({ events, snapshot: project(events), plan: mkPlan() }).verdict).toBe('NEEDS HUMAN DEV REVIEW');
   });
 });
 

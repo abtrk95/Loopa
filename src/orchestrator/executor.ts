@@ -350,7 +350,7 @@ async function runVerification(ctx: ExecContext, slice: Slice, workRepo: GitRepo
     signal: ctx.signal,
     onCheckStart: (c) => ctx.emit({ type: 'CHECK_STARTED', source: 'verifier', sliceId: slice.id, attemptId, payload: { checkId: c.id, command: c.command } }),
     onCheckOutput: (c) => ctx.emit({ type: 'CHECK_OUTPUT', source: 'verifier', sliceId: slice.id, attemptId, payload: { checkId: c.id, summary: c.summary } }),
-    onCheckFinish: (c) => ctx.emit({ type: 'CHECK_FINISHED', source: 'verifier', sliceId: slice.id, attemptId, payload: { checkId: c.id, ok: c.ok, durationMs: c.durationMs } }),
+    onCheckFinish: (c) => ctx.emit({ type: 'CHECK_FINISHED', source: 'verifier', sliceId: slice.id, attemptId, payload: { checkId: c.id, ok: c.ok, durationMs: c.durationMs, summary: c.summary } }),
   });
 }
 

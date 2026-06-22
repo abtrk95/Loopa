@@ -7,8 +7,9 @@ import { ProcessManager } from '../process/manager.js';
 import { GitError } from '../domain/errors.js';
 import type { RunSnapshot } from '../events/projection.js';
 import { progressPercent } from '../events/projection.js';
-import { renderHumanReviewSection } from './pr-review.js';
+import { renderHumanReviewSection, renderHumanReviewFromEvidence, extractEvidence } from './pr-review.js';
 import type { Plan } from '../domain/schemas.js';
+import type { AgentLoopEvent } from '../events/types.js';
 
 export interface CreatePrOptions {
   root: string;
@@ -22,6 +23,12 @@ export interface CreatePrOptions {
   /** The run's plan, so the PR body's human-review section reports the SAME risk
    * level as the full `pr review` report (the snapshot alone has no slice risk). */
   plan?: Plan;
+  /** The run's event log. When present, the PR body's human-review section is built
+   * from the SAME full evidence as `pr review` (AI reviewer + browser + safety scans),
+   * so the body can never be more optimistic than the report. */
+  events?: readonly AgentLoopEvent[];
+  /** Browser/UI artifact paths to reference in the body. */
+  browserArtifacts?: string[];
 }
 
 export interface CreatePrResult {
@@ -53,7 +60,7 @@ export async function createPullRequest(opts: CreatePrOptions, snapshot: RunSnap
     }
   }
 
-  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue, opts.plan), '--head', opts.branch];
+  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot, opts), '--head', opts.branch];
   if (opts.draft) args.push('--draft');
   if (opts.baseBranch) args.push('--base', opts.baseBranch);
   const res = await pm.run(['gh', ...args], { cwd: opts.root, timeoutMs: 60_000 });
@@ -88,7 +95,7 @@ export async function updatePullRequest(opts: CreatePrOptions, snapshot: RunSnap
   if (!existing) {
     return createPullRequest(opts, snapshot, pm);
   }
-  const editArgs = ['pr', 'edit', String(existing.number), '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue, opts.plan)];
+  const editArgs = ['pr', 'edit', String(existing.number), '--title', prTitle(snapshot), '--body', prBody(snapshot, opts)];
   const res = await pm.run(['gh', ...editArgs], { cwd: opts.root, timeoutMs: 60_000 });
   if (!res.ok) {
     throw new GitError(`gh pr edit failed (exit ${res.exitCode}).`, { details: { stderr: res.stderr.slice(0, 500) } });
@@ -100,17 +107,30 @@ function prTitle(s: RunSnapshot): string {
   return `agent-loop: ${s.goal.slice(0, 80)}`;
 }
 
-function prBody(s: RunSnapshot, sourceIssue?: number, plan?: Plan): string {
+function prBody(s: RunSnapshot, opts: CreatePrOptions): string {
+  const { sourceIssue, plan } = opts;
   const blocked = s.blocker ? [`**Blocked:** ${s.blocker.reason}`, ``] : [];
+  // Build the human-review section from the FULL event log when available, so the body's
+  // verdict/risk (incl. AI-reviewer + browser + safety scans) matches the `pr review`
+  // report exactly and can never be more optimistic; fall back to the snapshot otherwise.
+  const humanReview =
+    opts.events && opts.events.length
+      ? renderHumanReviewFromEvidence(
+          extractEvidence({
+            events: opts.events,
+            snapshot: s,
+            ...(plan ? { plan } : {}),
+            ...(sourceIssue !== undefined ? { sourceIssue } : {}),
+            ...(opts.browserArtifacts ? { browserArtifacts: opts.browserArtifacts } : {}),
+          }),
+        )
+      : renderHumanReviewSection(s, { ...(plan ? { plan } : {}), ...(sourceIssue !== undefined ? { sourceIssue } : {}) });
   const lines = [
     `## Summary`,
     `Autonomous implementation by agent-loop.`,
     ...(sourceIssue ? [``, `Refs #${sourceIssue}`] : []), // Refs (not Closes) — never auto-closes the issue.
     ``,
-    // Plain-English, non-technical human-review section up top (verdict, checks,
-    // risk, manual checklist, and the explicit "no auto-merge / human review" banner).
-    // The plan is threaded through so risk matches the full `pr review` report.
-    renderHumanReviewSection(s, { ...(plan ? { plan } : {}), ...(sourceIssue !== undefined ? { sourceIssue } : {}) }),
+    humanReview,
     ``,
     `<details>`,
     `<summary>Technical details</summary>`,
