@@ -32,7 +32,7 @@ Callers append a `NewEvent` (just `runId`, `type`, `source`, and optional
 ### Sources
 
 `orchestrator`, `intake`, `planner`, `git`, `process`, `verifier`, `reviewer`,
-`control`, `github`. There is deliberately **no `agent` source**: an agent's process is
+`browser`, `control`, `github`. There is deliberately **no `agent` source**: an agent's process is
 observed (`process` emits `AGENT_PROCESS_*`), but the agent never authors an event that
 asserts progress.
 
@@ -48,6 +48,7 @@ fs / git:        FILE_CHANGED, COMMIT_CREATED, ROLLBACK_STARTED, ROLLBACK_FINISH
 checks/verify:   CHECK_STARTED, CHECK_OUTPUT, CHECK_FINISHED, VERIFICATION_STARTED,
                  VERIFICATION_PASSED, VERIFICATION_FAILED
 review:          REVIEW_STARTED, REVIEW_FINISHED
+browser:         BROWSER_VERIFICATION_STARTED, BROWSER_VERIFICATION_FINISHED
 slice terminal:  SLICE_COMPLETED, SLICE_RETRY_SCHEDULED, SLICE_BLOCKED
 final:           FINAL_VERIFICATION_STARTED, FINAL_VERIFICATION_FINISHED,
                  RUN_COMPLETED, RUN_FAILED, RUN_CANCELLED
@@ -70,9 +71,11 @@ integrations:    PR_CREATED
 | `FILE_CHANGED` | `files` (array of real changed paths) |
 | `CHECK_STARTED` | `checkId`, `command` |
 | `CHECK_FINISHED` | `checkId`, `ok`, `durationMs` |
-| `VERIFICATION_PASSED` | `addedLines`, `files` |
+| `VERIFICATION_PASSED` | `addedLines`, `files` (a **count** of changed files, not the list) |
 | `VERIFICATION_FAILED` | `reason` |
-| `COMMIT_CREATED` | `sha`, `message`, `files` (idempotency key `commit:<slice>`) |
+| `BROWSER_VERIFICATION_STARTED` | `routes` (count) |
+| `BROWSER_VERIFICATION_FINISHED` | `ok`, `ran`, `engine`, `summary`, `routes` (count), `required` |
+| `COMMIT_CREATED` | `sha`, `message`, `files` (array of paths; idempotency key `commit:<slice>`) |
 | `SLICE_COMPLETED` | `sha`, `summary` |
 | `SLICE_RETRY_SCHEDULED` | `attempt`, `reason` |
 | `SLICE_BLOCKED` | `reason`, `details` |

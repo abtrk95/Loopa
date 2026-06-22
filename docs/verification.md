@@ -61,10 +61,14 @@ already downgraded the verdict.
    assertions, `xit`/`xdescribe`, etc.) → `fail`. Prevents the classic "make the test
    pass by deleting the test" failure mode.
 
-7. **Lockfile policy.** If a lockfile changed and `plan.riskPolicy.allowLockfileChanges`
+7. **Merge-conflict markers** (`detectMergeConflicts`). Scans the added diff for
+   unresolved conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) → `fail`. Prevents an
+   agent from committing a half-merged file.
+
+8. **Lockfile policy.** If a lockfile changed and `plan.riskPolicy.allowLockfileChanges`
    is false → `fail`; if allowed → recorded as a `flag`.
 
-8. **Required command checks** (the expensive stage). For each of the slice's
+9. **Required command checks** (the expensive stage). For each of the slice's
    `requiredChecks` (resolved against the plan's global checks), the verifier runs the
    command through the sandboxed `ProcessManager` in the work repo and evaluates its
    `expect` policy (`exit_zero` | `exit_nonzero` | `stdout_contains`). Output is

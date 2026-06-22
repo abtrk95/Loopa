@@ -56,7 +56,9 @@ Source: `src/watch/render.ts` (rendering), `src/watch/dashboard.ts` (the watcher
 ### Responsive layout
 
 The renderer adapts to terminal width: a 3-column middle row on wide terminals, folding
-to 2 columns below `tui.compactWidth` (default 90), with the footer wrapping as needed.
+to 2 columns below **90 columns**, with the footer wrapping as needed. (The fold
+threshold is currently a fixed 90; `tui.compactWidth` is accepted in config but not yet
+read by the renderer — use the `--compact` flag to force 2-column mode regardless of width.)
 Box widths are computed against the actual column count so content never overflows the
 frame.
 

@@ -84,7 +84,7 @@ no network**. It reads a script from `.agent-loop/fake-provider.json`:
       "files": { "src/health.ts": "export const health = () => 200;\n" },
       "delete": ["old/legacy.ts"],
       "blocker": null,
-      "attempts": { "1": { "blocker": "simulated transient failure" } }
+      "attempts": [ { "blocker": "simulated transient failure" } ]
     }
   },
   "reviews": { "S-001": { "verdict": "pass" } }

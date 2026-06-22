@@ -1,0 +1,389 @@
+Question:
+  Acceptance criteria — how do we know a slice is done? (comma-separated)
+Recommended:
+  Add user authentication with password login and a billing payment page works end-to-end; all verification checks pass
+Why:
+  Concrete, checkable criteria sharpen each slice and define "done" precisely.
+Alternatives:
+  - List specific user-visible behaviors
+  - Reference the issue checkboxes
+  - Leave blank to default to "goal met + all checks pass"
+Risk:
+  Without criteria, "done" = goal satisfied and all verification checks pass (less precise, still safe).
+Default:
+  satisfy the goal end-to-end and pass all verification checks
+Optional.
+Your answer (Enter = accept recommended) [Add user authentication with password login and a billing payment page works end-to-end; all verification checks pass]
+> 
+Question:
+  Background / context the agent should know
+Recommended:
+  (your input)
+Why:
+  Context the agent cannot infer from the repo (product intent, history, constraints).
+Alternatives:
+  - Leave blank — the agent infers context from the repository
+Risk:
+  Missing context can lead the agent to wrong assumptions (recorded explicitly).
+Default:
+  inferred from the repository
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  User-visible behavior expected
+Recommended:
+  (your input)
+Why:
+  Describe what the user should observe; anchors UI/behavioral acceptance.
+Alternatives:
+  - Leave blank if there is no user-visible change
+Risk:
+  Advisory; does not gate the verifier.
+Default:
+  none specified
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Non-goals / explicitly out of scope (comma-separated)
+Recommended:
+  (your input)
+Why:
+  Explicit out-of-scope items keep slices tight and prevent scope creep.
+Alternatives:
+  - Leave blank — scope is limited strictly to the stated goal
+Risk:
+  Without non-goals the agent stays within the goal, but boundaries are softer.
+Default:
+  scope limited strictly to the stated goal
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Technical constraints (comma-separated)
+Recommended:
+  (your input)
+Why:
+  Technical constraints the work must respect (e.g. "stay within node", "no new dependencies").
+Alternatives:
+  - Leave blank — no extra constraints
+Risk:
+  Advisory context for the agent; the verifier still enforces scope/secret/diff rules.
+Default:
+  none beyond the detected stack
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Forbidden files/areas the agent must NOT touch (globs, comma-separated)
+Recommended:
+  (your input)
+Why:
+  Extra paths the agent must never touch. Built-in protections (.env, secrets/**, .git/**) always apply and are unioned in.
+Alternatives:
+  - Add legacy/vendored dirs you do not want changed
+  - Leave blank — built-in protections still apply
+Risk:
+  Forbidden paths can only be ADDED (scope can never be widened into secrets).
+Default:
+  built-in secret/infra protections only
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Risk level (low / medium / high)
+Recommended:
+  high
+Why:
+  Your goal mentions sensitive areas (auth/payment/security/migration/infra) — treat it as high risk.
+Alternatives:
+  - low
+  - medium
+  - high
+Risk:
+  Risk can only be RAISED, never lowered: a higher level adds reviewer gates. Declaring "low" on a risky goal does NOT bypass the heuristic floor.
+Default:
+  let the planner heuristic decide (raised by any explicit answer)
+Optional.
+Your answer (Enter = accept recommended) [high]
+> 
+Question:
+  Is browser/UI verification needed? (y/N)
+Recommended:
+  y
+Why:
+  Your goal/stack involves UI (pages/routes/components), so browser verification adds real coverage.
+Alternatives:
+  - y — capture screenshots + console errors per route
+  - n — rely on unit/integration checks
+Risk:
+  Browser verification needs a start command + a Chrome/Chromium binary; without them it falls back to an HTTP probe.
+Default:
+  n (no browser verification)
+Optional.
+Your answer (Enter = accept recommended) [y]
+> 
+Question:
+  Is GitHub / PR integration needed? (y/N)
+Recommended:
+  n
+Why:
+  No GitHub workflow implied; keep it off for a purely local run.
+Alternatives:
+  - y — draft PR + label/Kanban sync
+  - n — local only
+Risk:
+  GitHub integration only ever opens DRAFT PRs and moves labels; it never merges, deploys, or closes issues.
+Default:
+  n (local only)
+Optional.
+Your answer (Enter = accept recommended) [n]
+> 
+Question:
+  Can this run autonomously without prompts? (y/N)
+Recommended:
+  n
+Why:
+  This looks high-risk — keep a human in the loop. Autonomy does not pause for approval.
+Alternatives:
+  - y — run unattended (still gated by the verifier; never auto-merges)
+  - n — pause at human checkpoints
+Risk:
+  Autonomous + high-risk is discouraged: completion is still verifier-gated, but no human reviews intermediate steps.
+Default:
+  n (attended)
+Optional.
+Your answer (Enter = accept recommended) [n]
+> 
+Question:
+  Existing architecture the work must fit into
+Recommended:
+  (your input)
+Why:
+  Existing architecture the work must fit into; otherwise the agent infers it.
+Alternatives:
+  - Leave blank — inferred from the repository
+Risk:
+  Advisory context only.
+Default:
+  inferred from the repository
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Deployment / merge policy
+Recommended:
+  Manual review required; agent-loop never auto-merges or deploys.
+Why:
+  agent-loop is strengthen-only: a human always reviews the draft PR before merge.
+Alternatives:
+  - Document a specific reviewer/branch policy
+Risk:
+  This is enforced regardless: there is no auto-merge/auto-deploy path.
+Default:
+  Manual review required; never auto-merges/deploys
+Optional.
+Your answer (Enter = accept recommended) [Manual review required; agent-loop never auto-merges or deploys.]
+> 
+Question:
+  Human approval checkpoints required (comma-separated)
+Recommended:
+  before opening the PR
+Why:
+  For high-risk work, an explicit human checkpoint before the PR adds a deliberate gate.
+Alternatives:
+  - before each high-risk slice
+  - before opening the PR
+  - none
+Risk:
+  Checkpoints add safety but pause progress; the verifier gates completion regardless.
+Default:
+  none (final completion still requires verified slices)
+Optional.
+Your answer (Enter = accept recommended) [before opening the PR]
+> 
+Question:
+  Stop / blocker conditions (comma-separated)
+Recommended:
+  (your input)
+Why:
+  Conditions that should halt the run; sensible defaults already apply.
+Alternatives:
+  - Add a budget or time cap
+  - Leave blank — defaults apply
+Risk:
+  Defaults already stop on any verification failure after retries, or any out-of-scope/secret change.
+Default:
+  any verification failure after retries, or out-of-scope/secret changes
+Optional.
+Your answer (Enter = accept recommended)
+> 
+Question:
+  Planner provider/model — who decomposes the work into slices?
+Recommended:
+  claude
+Why:
+  claude is installed and strong at decomposing work into small, verifiable slices.
+Alternatives:
+  - codex
+  - opencode
+Risk:
+  The planner shapes the slice graph; a weak planner yields poor decomposition (but the verifier still gates every slice).
+Default:
+  fake (deterministic; demo only)
+Optional.
+Your answer (Enter = accept recommended) [claude]
+> 
+Question:
+  Worker provider(s)/model(s) that execute slices (comma-separated)?
+Recommended:
+  single worker: claude
+Why:
+  Start with one capable worker (claude). Overlapping scopes serialize regardless, so a single worker is the safe, conflict-free default.
+Alternatives:
+  - multiple workers: claude, codex, opencode (diverse, for independent slices)
+  - a single worker (recommended to start)
+Risk:
+  Multiple workers speed up INDEPENDENT slices but can increase merge/scope churn; overlapping path scopes always serialize for safety.
+Default:
+  claude
+Optional.
+Your answer (Enter = accept recommended) [claude]
+> 
+Question:
+  How many slices may run in parallel (concurrency)?
+Recommended:
+  1
+Why:
+  Begin conservatively at concurrency 1. Overlapping scopes serialize anyway; raise this only once slices are proven independent.
+Alternatives:
+  - 1 — sequential (recommended to start)
+Risk:
+  Higher concurrency parallelizes independent, parallel-safe slices via isolated worktrees, but increases integration churn. The scheduler never parallelizes overlapping scopes.
+Default:
+  1 (sequential)
+Optional.
+Your answer (Enter = accept recommended) [1]
+> 
+Question:
+  Reviewer provider/model — "none" for the deterministic verifier only?
+Recommended:
+  codex
+Why:
+  High-risk work benefits from a second, DISTINCT model (codex) reviewing each diff. The reviewer is advisory and can never override the deterministic verifier.
+Alternatives:
+  - none — verifier only
+  - claude
+  - opencode
+Risk:
+  A reviewer adds latency/cost and STRENGTHENS review, but it can never pass a slice the verifier failed (out-of-scope, secrets, failed checks).
+Default:
+  none (deterministic verifier only)
+Optional.
+Your answer (Enter = accept recommended) [codex]
+> 
+Question:
+  Make browser/UI verification required (blocking) rather than advisory? (y/N)
+Recommended:
+  y
+Why:
+  High-risk UI work: make browser verification BLOCKING so a broken route fails the slice.
+Alternatives:
+  - y — required (a browser failure BLOCKS the slice)
+  - n — advisory (failure is flagged only)
+Risk:
+  Required browser checks can block on flaky environments; advisory checks never override the verifier.
+Default:
+  n (advisory)
+Optional.
+Your answer (Enter = accept recommended) [y]
+> 
+Question:
+  Require consensus from multiple distinct reviewers? (y/N)
+Recommended:
+  y
+Why:
+  High-risk + ≥2 installed providers: a consensus of distinct reviewers catches more issues.
+Alternatives:
+  - y — require multiple distinct reviewers to agree
+  - n — single reviewer / verifier only
+Risk:
+  Consensus increases cost linearly with votes; it strengthens review but never overrides the verifier.
+Default:
+  n (single reviewer / verifier only)
+Optional.
+Your answer (Enter = accept recommended) [y]
+> 
+Question:
+  Fixer strategy — "same-as-worker" or a dedicated provider?
+Recommended:
+  same-as-worker
+Why:
+  Reusing the worker preserves the slice context for the fix attempt. Switch to a dedicated fixer only if one provider repeatedly fails the same slice.
+Alternatives:
+  - same-as-worker (recommended)
+  - claude
+  - codex
+  - opencode
+Risk:
+  The fixer only re-attempts a failed slice; the verifier re-checks the result either way.
+Default:
+  same-as-worker
+Optional.
+Your answer (Enter = accept recommended) [same-as-worker]
+> 
+Question:
+  Fallback provider when the primary fails — "none" to disable?
+Recommended:
+  codex
+Why:
+  A fallback (codex) lets a failed slice retry on a different provider instead of giving up.
+Alternatives:
+  - none
+  - codex
+  - opencode
+Risk:
+  A fallback adds resilience with no downside to safety; the verifier judges whichever provider produced the diff.
+Default:
+  none
+Optional.
+Your answer (Enter = accept recommended) [codex]
+> 
+Question:
+  Switch to another provider on retry (instead of reusing the fixer)? (y/N)
+Recommended:
+  y
+Why:
+  With ≥2 providers, switching providers on retry avoids repeating the same failure mode.
+Alternatives:
+  - y — advance to the next provider on retry
+  - n — retry with the fixer/same provider
+Risk:
+  Switching providers on retry is purely a routing choice; the verifier still gates the result.
+Default:
+  n (retry with the fixer)
+Optional.
+Your answer (Enter = accept recommended) [y]
+> 
+Interview (strict) complete. Recorded 7 assumption(s).
+Goal: Add user authentication with password login and a billing payment page
+Slices: 1
+  S-001  [high] Add user authentication with password login and a billing payment page
+        paths: **
+        checks: typecheck, lint, test, build
+Orchestration (verifier remains authoritative; AI roles can never override it):
+  planner:     claude
+  workers:     claude
+  reviewer:    codex
+  fixer:       same-as-worker
+  concurrency: 1 (sequential)
+  fallback:    codex  switch-on-retry: true
+  consensus:   2  browser: required  github: on  auto: false
+  note: Reviewer consensus enabled (2 votes). For distinct-provider voting, set roles.reviewers in config.
+  note: Browser verification enabled — set browser.startCommand / baseUrl / routes in config before running.
+  (these are applied to THIS run; pass --write-config to persist to .agent-loop/config.yml)
+Objective:   /Users/abtrk/Dev/loop/e2e-supportdesk-20260622-113042/.agent-loop/objective.md
+Assumptions: /Users/abtrk/Dev/loop/e2e-supportdesk-20260622-113042/.agent-loop/assumptions.md
+Plan:        /Users/abtrk/Dev/loop/e2e-supportdesk-20260622-113042/.agent-loop/plan.json
+Edit the plan if needed, then run it with: agent-loop run --auto

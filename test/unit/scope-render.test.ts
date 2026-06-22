@@ -48,6 +48,20 @@ describe('structural scan', () => {
     expect(kinds).toContain('traversal');
     expect(kinds).toContain('symlink-escape');
   });
+  it('flags a binary file when flagBinary is on, and not a text file', () => {
+    const dir = tmp();
+    writeFileSync(join(dir, 'logo.bin'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]));
+    writeFileSync(join(dir, 'note.txt'), 'plain text, no NUL bytes\n');
+    const findings = structuralScan(dir, ['logo.bin', 'note.txt'], { flagBinary: true });
+    expect(findings.find((f) => f.path === 'logo.bin')?.kind).toBe('binary');
+    expect(findings.some((f) => f.path === 'note.txt')).toBe(false);
+  });
+  it('does NOT flag a binary file when flagBinary is off', () => {
+    const dir = tmp();
+    writeFileSync(join(dir, 'logo.bin'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+    const findings = structuralScan(dir, ['logo.bin'], { flagBinary: false });
+    expect(findings.some((f) => f.kind === 'binary')).toBe(false);
+  });
 });
 
 const snap: RunSnapshot = {

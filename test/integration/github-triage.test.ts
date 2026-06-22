@@ -137,6 +137,16 @@ describe('classifyIssue', () => {
     const r = classifyIssue({ number: 4, title: 'How do I run this?', body: 'short', labels: [] }, 'quick');
     expect(r.status).toBe('unsupported');
   });
+  it('classifies a vague improvement request as needs-info (actionable but thin), not unsupported', () => {
+    // "improve / make it better" are actionable intents that need clarification — the
+    // canonical needs-info case (regression for the Phase-6 misclassification).
+    const r = classifyIssue(
+      { number: 5, title: 'Make the dashboard better', body: 'Improve the dashboard and make it more useful.', labels: [] },
+      'standard',
+    );
+    expect(r.status).toBe('needs-info');
+    expect(r.clarifications.length).toBeGreaterThan(0);
+  });
 });
 
 describe('triageRepo', () => {

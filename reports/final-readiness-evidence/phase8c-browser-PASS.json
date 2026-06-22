@@ -1,0 +1,16 @@
+{
+  "sliceId": "S-001",
+  "ok": true,
+  "engine": "cdp",
+  "summary": "browser verification passed (1 route(s), engine=cdp)",
+  "routes": [
+    {
+      "route": "/",
+      "url": "http://127.0.0.1:5173/",
+      "status": 200,
+      "ok": true,
+      "consoleErrors": [],
+      "artifact": "/Users/abtrk/Dev/loop/e2e-supportdesk-20260622-113042/.agent-loop/artifacts/ui-smoke/S-001__root.png"
+    }
+  ]
+}

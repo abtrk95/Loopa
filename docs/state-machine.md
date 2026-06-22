@@ -18,9 +18,11 @@ Two event types drive the machines:
 - `SLICE_STATE_CHANGED` — payload `{ from, to }`, authoritative for a slice's state.
 
 Other "semantic" events (`RUN_STARTED`, `SLICE_COMPLETED`, `COMMIT_CREATED`, …) carry
-audit detail and dashboard data. Some semantic events also imply a state for the
-projection (e.g. `RUN_COMPLETED` ⇒ `COMPLETED`), but the engine emits them together with
-the corresponding state change so the log is internally consistent.
+audit detail and dashboard data. A state transition emits **either** a semantic event
+that *implies* the new state (e.g. `RUN_STARTED` ⇒ `RUNNING`, `RUN_COMPLETED` ⇒
+`COMPLETED`) **or**, when no semantic event applies, a bare `RUN_STATE_CHANGED` — not
+both. The projection maps each semantic event to its state, so the derived run state is
+the same either way and the log stays internally consistent.
 
 ## Run states
 

@@ -55,7 +55,8 @@ export interface TriageReport {
   results: TriageResult[];
 }
 
-const ACTIONABLE_RE = /\b(implement|add|fix|create|build|refactor|update|remove|support|enable|migrate|write|integrate|expose|handle)\b/i;
+const ACTIONABLE_RE =
+  /\b(implement|add|fix|create|build|refactor|update|remove|support|enable|migrate|write|integrate|expose|handle|improve|enhance|optimi[sz]e|polish|redesign|revamp|streamline|modernize|simplify|rework|clean\s*up|speed\s*up)\b|\bmake\b[^.\n]{0,40}\b(better|faster|easier|nicer|cleaner|simpler|more)\b/i;
 const QUESTION_TITLE_RE = /\?\s*$/;
 const MIN_DETAIL = 80; // chars of body that count as "specified enough"
 
