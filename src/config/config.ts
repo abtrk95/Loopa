@@ -144,11 +144,74 @@ export const TuiConfigSchema = z
   .strict();
 export type TuiConfig = z.infer<typeof TuiConfigSchema>;
 
+/** Configurable GitHub label names. Safe `agent-loop:*` defaults; the `review`
+ * status and the `review` role intentionally share one label. */
+export const GithubLabelsSchema = z
+  .object({
+    // status labels
+    ready: z.string().default('agent-loop:ready'),
+    needsInfo: z.string().default('agent-loop:needs-info'),
+    planning: z.string().default('agent-loop:planning'),
+    planReady: z.string().default('agent-loop:plan-ready'),
+    running: z.string().default('agent-loop:running'),
+    blocked: z.string().default('agent-loop:blocked'),
+    review: z.string().default('agent-loop:review'),
+    done: z.string().default('agent-loop:done'),
+    error: z.string().default('agent-loop:error'),
+    // triage classifications
+    tooRisky: z.string().default('agent-loop:too-risky'),
+    unsupported: z.string().default('agent-loop:unsupported'),
+    // role / stage labels (inspired by Looper-main)
+    plan: z.string().default('agent-loop:plan'),
+    work: z.string().default('agent-loop:work'),
+    fix: z.string().default('agent-loop:fix'),
+  })
+  .strict();
+export type GithubLabels = z.infer<typeof GithubLabelsSchema>;
+
+export const GithubTriageConfigSchema = z
+  .object({
+    /** Only consider issues bearing one of these labels (empty = all agent-loop:* labels). */
+    triggerLabels: z.array(z.string()).default([]),
+    /** Post clarification questions on needs-info issues (apply mode only). */
+    commentClarifications: z.boolean().default(false),
+    /** Interview depth used to generate clarification questions. */
+    interviewMode: z.enum(['quick', 'standard', 'strict']).default('quick'),
+  })
+  .strict();
+export type GithubTriageConfig = z.infer<typeof GithubTriageConfigSchema>;
+
+export const GithubProjectConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** Project (v2) number; auto-detected from the repo when omitted. */
+    number: z.number().int().positive().optional(),
+    /** Single-select field that holds the Kanban status. */
+    statusField: z.string().default('Status'),
+  })
+  .strict();
+export type GithubProjectConfig = z.infer<typeof GithubProjectConfigSchema>;
+
+export const GithubWatchConfigSchema = z
+  .object({
+    intervalSeconds: z.number().int().positive().default(300),
+    /** Hard cap on polling iterations (0 = unlimited; requires explicit opt-in to loop). */
+    maxIterations: z.number().int().nonnegative().default(0),
+  })
+  .strict();
+export type GithubWatchConfig = z.infer<typeof GithubWatchConfigSchema>;
+
 export const GithubConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
     remote: z.string().default('origin'),
     draftPr: z.boolean().default(true),
+    /** Default `owner/name` when `--repo` is omitted. */
+    repo: z.string().optional(),
+    labels: GithubLabelsSchema.default({}),
+    triage: GithubTriageConfigSchema.default({}),
+    project: GithubProjectConfigSchema.default({}),
+    watch: GithubWatchConfigSchema.default({}),
   })
   .strict();
 export type GithubConfig = z.infer<typeof GithubConfigSchema>;

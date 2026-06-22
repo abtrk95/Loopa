@@ -104,6 +104,11 @@ github:
   enabled: false
   remote: origin
   draftPr: true
+  # repo: owner/name           # default when --repo is omitted (triage/import/run-issue)
+  # labels: { ready: "agent-loop:ready", needsInfo: "agent-loop:needs-info", … }
+  # triage: { triggerLabels: [], commentClarifications: false, interviewMode: quick }
+  # project: { enabled: false, statusField: Status }   # GitHub Project (v2) Kanban
+  # watch: { intervalSeconds: 300, maxIterations: 0 }
 
 logging:
   level: info                  # debug | info | warn | error
@@ -189,6 +194,19 @@ advisory).
 Dashboard appearance ([terminal-dashboard.md](terminal-dashboard.md)); GitHub PR
 behavior ([github-integration.md](github-integration.md)); log level/retention; and
 per-provider binary/model/arg overrides.
+
+The `github` block also configures the **triage + Kanban** layer: `repo` (default
+`owner/name`), `labels` (configurable `agent-loop:*` status + role/stage labels), `triage`
+(trigger labels, clarification comments, interview depth), `project` (GitHub Project v2
+Kanban sync), and `watch` (poll interval, max iterations). Full reference:
+[github-triage-kanban.md](github-triage-kanban.md).
+
+### Interview / intake
+`plan --interview [quick|standard|strict]` and the `interview` command clarify the
+objective before slicing. The interview improves planning only and can only *strengthen*
+safety (it never weakens the verifier). It honors top-level `auto` (non-interactive →
+conservative recorded assumptions) and reads `verification.commands` / `riskPolicy` as
+context. See [interview-intake.md](interview-intake.md).
 
 ## Environment overrides
 

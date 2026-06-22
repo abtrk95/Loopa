@@ -104,3 +104,9 @@ once; none of that can corrupt a run, because none of it mutates the event log.
 `test/integration/watch-secrets.test.ts` verifies that a JSON snapshot renders
 consistently, that re-attaching yields the same state, that a plain-text frame renders
 for non-TTY output, and that secrets are redacted in what the watcher reads back.
+
+## Not to be confused with `github watch`
+
+`agent-loop watch` is this read-only **run dashboard**. `agent-loop github watch` is a
+separate, non-TUI **issue-triage polling loop** (dry-run by default, bounded, locked) —
+it does not render the dashboard. See [github-triage-kanban.md](github-triage-kanban.md).

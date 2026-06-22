@@ -136,6 +136,16 @@ behind on purpose — the next run detects it as stale.
   orphaned child is the one residue and must be reaped by the OS / the user. This is an
   inherent limitation of `SIGKILL`, stated plainly rather than hidden.
 
+## GitHub watch lock
+
+`agent-loop github watch` (polling mode) uses the **same single-writer lock mechanism**
+at `.agent-loop/control/github-watch.pid`: a second watcher for the same project is
+refused while a live one holds the lock, and a stale lock from a crashed watcher
+self-heals (dead-PID takeover) on the next start. Watch state
+(`.agent-loop/github/watch-state.json`) makes each pass idempotent, so a resumed/repeated
+watch never re-processes an unchanged issue. See
+[github-triage-kanban.md](github-triage-kanban.md#watch-mode-safe-by-design).
+
 ## Tests
 
 `test/integration/recovery-control.test.ts` proves: a blocked run resumes and
@@ -143,3 +153,5 @@ re-attempts the blocked slice without redoing completed work; resuming an alread
 completed run is an idempotent no-op; and pause/resume round-trips through the control
 plane. `test/integration/process-cleanup.test.ts` proves stale-PID detection/takeover,
 live-holder refusal, and SIGINT/SIGTERM/timeout process-tree reaping.
+`test/integration/github-triage.test.ts` proves the github-watch lock refuses a second
+live watcher and that `watch --once` is idempotent.

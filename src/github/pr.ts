@@ -15,11 +15,15 @@ export interface CreatePrOptions {
   draft: boolean;
   push: boolean;
   baseBranch?: string;
+  /** Source GitHub issue to reference (Refs #N — never "Closes", to avoid auto-close). */
+  sourceIssue?: number;
 }
 
 export interface CreatePrResult {
   url: string;
   created: boolean;
+  /** True when an existing PR was edited rather than created. */
+  updated?: boolean;
 }
 
 export async function createPullRequest(opts: CreatePrOptions, snapshot: RunSnapshot, pm = new ProcessManager()): Promise<CreatePrResult> {
@@ -44,7 +48,7 @@ export async function createPullRequest(opts: CreatePrOptions, snapshot: RunSnap
     }
   }
 
-  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot), '--head', opts.branch];
+  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue), '--head', opts.branch];
   if (opts.draft) args.push('--draft');
   if (opts.baseBranch) args.push('--base', opts.baseBranch);
   const res = await pm.run(['gh', ...args], { cwd: opts.root, timeoutMs: 60_000 });
@@ -57,23 +61,59 @@ export async function createPullRequest(opts: CreatePrOptions, snapshot: RunSnap
   return { url, created: true };
 }
 
+/**
+ * Upsert a PR for the branch: edit the existing one (refreshing title/body from the
+ * verified snapshot) or create it if none exists. Never duplicates, never merges,
+ * never deploys.
+ */
+export async function updatePullRequest(opts: CreatePrOptions, snapshot: RunSnapshot, pm = new ProcessManager()): Promise<CreatePrResult> {
+  const list = await pm.run(['gh', 'pr', 'list', '--head', opts.branch, '--json', 'url,number', '--limit', '1'], {
+    cwd: opts.root,
+    timeoutMs: 30_000,
+  });
+  let existing: { url: string; number: number } | undefined;
+  if (list.ok) {
+    try {
+      const arr = JSON.parse(list.stdout) as Array<{ url: string; number: number }>;
+      if (arr[0]?.url) existing = arr[0];
+    } catch {
+      // fall through to create
+    }
+  }
+  if (!existing) {
+    return createPullRequest(opts, snapshot, pm);
+  }
+  const editArgs = ['pr', 'edit', String(existing.number), '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue)];
+  const res = await pm.run(['gh', ...editArgs], { cwd: opts.root, timeoutMs: 60_000 });
+  if (!res.ok) {
+    throw new GitError(`gh pr edit failed (exit ${res.exitCode}).`, { details: { stderr: res.stderr.slice(0, 500) } });
+  }
+  return { url: existing.url, created: false, updated: true };
+}
+
 function prTitle(s: RunSnapshot): string {
   return `agent-loop: ${s.goal.slice(0, 80)}`;
 }
 
-function prBody(s: RunSnapshot): string {
+function prBody(s: RunSnapshot, sourceIssue?: number): string {
+  const blocked = s.blocker ? [`**Blocked:** ${s.blocker.reason}`, ``] : [];
   const lines = [
     `## Summary`,
     `Autonomous implementation by agent-loop.`,
+    ...(sourceIssue ? [``, `Refs #${sourceIssue}`] : []), // Refs (not Closes) — never auto-closes the issue.
     ``,
     `**Verified progress:** ${s.verifiedCompleted}/${s.totalSlices} slices (${progressPercent(s)}%)`,
     `**Run state:** ${s.runState}`,
     ``,
+    ...blocked,
     `## Slices`,
     ...s.sliceOrder.map((id) => {
       const slice = s.slices[id];
       return slice ? `- ${id} ${slice.title} — ${slice.state}${slice.lastCommit ? ` (${slice.lastCommit.slice(0, 8)})` : ''}` : '';
     }),
+    ``,
+    `## Checks run`,
+    ...(s.checks.length ? s.checks.map((c) => `- ${c.id}: ${c.state}`) : ['- (see run report)']),
     ``,
     `> Completion is derived from deterministic verification + scoped commits, not agent claims.`,
     `> Review before merging. agent-loop does not auto-merge or deploy.`,

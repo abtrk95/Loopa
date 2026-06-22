@@ -7,8 +7,9 @@
 import { newRunId } from '../domain/ids.js';
 import type { Session } from './session.js';
 import { savePlan, saveObjective, saveRunMeta } from './session.js';
-import { normalizeInput, type RawInput } from '../intake/normalize.js';
-import { buildPlan } from '../planner/plan.js';
+import { normalizeInput, type RawInput, type NormalizeResult } from '../intake/normalize.js';
+import { buildPlan, type BuildPlanOptions } from '../planner/plan.js';
+import { applyInterview, type InterviewOutcome } from '../intake/interview.js';
 import { assertValidPlan, type ValidationReport } from '../planner/validate.js';
 import type { Plan, Objective, RiskPolicy } from '../domain/schemas.js';
 import type { Config } from '../config/config.js';
@@ -17,6 +18,8 @@ export interface CreatePlanOptions {
   input: RawInput;
   defaultBranch?: string | undefined;
   auto?: boolean;
+  /** Optional interview outcome folded into the objective (planning quality only). */
+  interview?: InterviewOutcome;
 }
 
 export interface CreatePlanResult {
@@ -28,7 +31,26 @@ export interface CreatePlanResult {
 
 export function createPlan(session: Session, opts: CreatePlanOptions): CreatePlanResult {
   const { normalizeOptions } = buildNormalizeOptions(session, opts);
-  const { objective, stories } = normalizeInput(opts.input, normalizeOptions);
+  const base: NormalizeResult = normalizeInput(opts.input, normalizeOptions);
+
+  // Fold an interview outcome into the objective (planning quality only). The
+  // interview can only STRENGTHEN safety: forbidden paths are unioned, checks are
+  // added, risk is raised to a floor. It never relaxes a verifier guard.
+  let objective: Objective;
+  let stories = base.stories;
+  let buildHints: Pick<BuildPlanOptions, 'riskFloor' | 'extraSliceNotes'> = {};
+  if (opts.interview) {
+    const applied = applyInterview(base, opts.interview);
+    objective = applied.objective;
+    stories = applied.stories;
+    objective.assumptions = [...objective.assumptions, ...applied.assumptionLines];
+    buildHints = {
+      ...(applied.riskFloor ? { riskFloor: applied.riskFloor } : {}),
+      ...(applied.extraSliceNotes ? { extraSliceNotes: applied.extraSliceNotes } : {}),
+    };
+  } else {
+    objective = base.objective;
+  }
 
   // The deterministic verifier reads its policy from plan.riskPolicy (forbidden
   // paths, lockfile/dependency policy, diff ceiling). Without this merge the user's
@@ -41,6 +63,7 @@ export function createPlan(session: Session, opts: CreatePlanOptions): CreatePla
   const plan = buildPlan(objective, stories, {
     createdAt,
     branch: deriveBranch(session, objective.goal),
+    ...buildHints,
   });
   const validation = assertValidPlan(plan);
 

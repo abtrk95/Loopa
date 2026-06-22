@@ -6,6 +6,8 @@ import { parseArgs, flagBool, flagStr, flagNum, resolveRoot, type ParsedArgs } f
 import { AgentLoopError, PlanValidationError, errorMessage } from '../domain/errors.js';
 import { cmdInit } from './commands/init.js';
 import { cmdPlan } from './commands/plan.js';
+import { cmdInterview } from './commands/interview.js';
+import { cmdGithub } from './commands/github.js';
 import { cmdRun, cmdRetry } from './commands/run.js';
 import { cmdStatus, cmdPause, cmdResume, cmdStop, cmdLogs, cmdDiff } from './commands/control.js';
 import { cmdDoctor, cmdProviders, cmdInspect } from './commands/info.js';
@@ -44,6 +46,9 @@ COMMANDS
   plan   --idea "..."         Plan from an idea
          --prd <file>         Plan from a Markdown/JSON PRD
          --spec <file> | --readme <file> | --issue <n> | --stdin
+         [--interview [quick|standard|strict]]  Clarify before slicing
+  interview [quick|standard|strict]  Interview-first intake (then plan)
+  github <triage|import|run-issue|watch|project|pr> ...  GitHub orchestration
   run    [--auto] [--watch]   Execute the plan (--auto = unattended)
   retry                       Resume a blocked/interrupted run
   watch  [--json|--plain]     Live dashboard (attach from any terminal)
@@ -100,6 +105,10 @@ async function dispatch(command: string, args: ParsedArgs): Promise<number> {
       return cmdInit(args);
     case 'plan':
       return await cmdPlan(args);
+    case 'interview':
+      return await cmdInterview(args);
+    case 'github':
+      return await cmdGithub(args);
     case 'run':
       return await cmdRun(args);
     case 'retry':

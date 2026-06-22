@@ -1,10 +1,16 @@
 # GitHub integration
 
-agent-loop's GitHub integration is deliberately minimal and **explicit**. It does one
-outward thing — open a pull request — and only when you ask. It never pushes implicitly,
+agent-loop's GitHub integration is deliberately **explicit** and safe. The core outward
+action is opening a **draft** pull request, only when you ask. It never pushes implicitly,
 never merges, and never deploys.
 
-Source: `src/github/pr.ts`, `src/cli/commands/pr.ts`, config `github.*`.
+This page documents the **PR** surface (and the input side of reading an issue). For the
+**triage + Kanban orchestration** layer — issue classification, configurable labels,
+GitHub Project (v2) sync, importing/running an issue, and watch mode — see
+[github-triage-kanban.md](github-triage-kanban.md).
+
+Source: `src/github/pr.ts`, `src/cli/commands/pr.ts`, `src/cli/commands/github.ts`,
+`src/github/{client,triage,labels,project,watch}.ts`, config `github.*`.
 
 ## Reading issues as input
 
@@ -18,6 +24,16 @@ agent-loop plan --issue 123        # fetches the issue (via gh) and normalizes i
 The issue body is normalized like any PRD: the title becomes the objective, and checkbox
 lines (`- [ ] ...` / `- [x] ...`) become acceptance criteria. See
 [architecture.md](architecture.md#intake-srcintake).
+
+You can also import an issue from a **named repo** and (optionally) clarify it with the
+interview before slicing, then run it through the local loop:
+
+```bash
+agent-loop github import    --repo owner/name --issue 123 [--interview]
+agent-loop github run-issue --repo owner/name --issue 123 --auto [--pr] [--project]
+```
+
+See [github-triage-kanban.md](github-triage-kanban.md) for triage, labels, and Kanban.
 
 ## Creating a pull request
 
@@ -67,7 +83,9 @@ A `PR_CREATED` event (`{ url, created }`) records the action in the log.
 - **Never auto-merges.** PRs are draft by default and merging is always a human action.
 - **Never deploys.** There is no deploy path in the tool.
 - **Never pushes without `--push`.** Pushing is an explicit flag on an explicit command.
-- **Never opens duplicate PRs.** It reuses an existing PR for the branch.
+- **Never opens duplicate PRs.** It reuses (and refreshes) an existing PR for the branch.
+- **Never closes issues.** There is no `gh issue close` path; a PR links the issue with
+  `Refs #N` (not `Closes`), so merging never auto-closes it.
 
 This is part of the security posture: outward, hard-to-reverse actions require explicit
 human intent. See [security-model.md](security-model.md#defense-7--explicit-outward-actions-only).
@@ -101,7 +119,27 @@ github:
   enabled: false      # gate the feature
   remote: origin      # which remote to push to
   draftPr: true       # open as draft (recommended)
+  repo: ""            # default owner/name when --repo is omitted (optional)
+  labels:             # configurable; safe agent-loop:* defaults shown elsewhere
+    ready: "agent-loop:ready"
+    needsInfo: "agent-loop:needs-info"
+    # … planning, planReady, running, blocked, review, done, error,
+    #    tooRisky, unsupported, plan, work, fix
+  triage:
+    triggerLabels: []           # empty → [ready, plan, work]; only these issues are considered
+    commentClarifications: false
+    interviewMode: quick        # depth of clarification questions
+  project:
+    enabled: false              # GitHub Project (v2) Kanban sync
+    # number: 7                 # auto-detected if omitted
+    statusField: Status
+  watch:
+    intervalSeconds: 300
+    maxIterations: 0            # 0 = unbounded (requires explicit --yes to actually loop)
 ```
+
+The triage/labels/Kanban/watch keys are documented in
+[github-triage-kanban.md](github-triage-kanban.md).
 
 ## Requirements
 

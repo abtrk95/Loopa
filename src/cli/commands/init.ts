@@ -59,6 +59,17 @@ github:
   enabled: false
   remote: origin
   draftPr: true
+  # repo: owner/name            # default when --repo is omitted
+  # triage:                     # github triage + Kanban (dry-run by default)
+  #   triggerLabels: []         # empty → [agent-loop:ready, :plan, :work]
+  #   commentClarifications: false
+  #   interviewMode: quick
+  # project:
+  #   enabled: false            # GitHub Project (v2) Kanban sync
+  #   statusField: Status
+  # watch:
+  #   intervalSeconds: 300
+  #   maxIterations: 0          # 0 = unbounded (requires explicit --yes to loop)
 
 # Real providers may need explicit opt-in flags to edit files autonomously.
 # These are NOT added by default (safety). Example:
@@ -97,8 +108,10 @@ export function cmdInit(args: ParsedArgs): number {
       '',
       'Initialized agent-loop. Next steps:',
       '  agent-loop plan --idea "Build X"      # or --prd ./requirements.md',
+      '  agent-loop plan --idea "Build X" --interview   # clarify before slicing',
       '  agent-loop run --auto                  # execute the plan',
       '  agent-loop watch                       # live dashboard (another terminal)',
+      '  agent-loop github triage --repo o/n    # triage issues (dry-run by default)',
       '  agent-loop demo                        # deterministic demo, no API keys',
       '',
       "If `agent-loop` is not on your PATH, run it via `npm link` (then `agent-loop ...`),",

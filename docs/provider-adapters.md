@@ -8,6 +8,12 @@ from git and the deterministic verifier regardless of what the provider reports.
 Source: `src/providers/types.ts` (contract), `src/providers/fake.ts`,
 `src/providers/command.ts`, `src/providers/registry.ts`, `src/providers/routing.ts`.
 
+> **No provider needed for intake or GitHub orchestration.** The interview wizard
+> ([interview-intake.md](interview-intake.md)) and GitHub triage/Kanban
+> ([github-triage-kanban.md](github-triage-kanban.md)) are deterministic and run with
+> **no provider** (the default `fake` provider, or none). A real provider is only needed
+> to *implement* slices during `run` / `github run-issue`.
+
 ## The contract
 
 Every provider implements `ProviderAdapter`:

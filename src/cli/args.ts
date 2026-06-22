@@ -21,6 +21,16 @@ const VALUE_FLAGS = new Set([
   'run',
   'level',
   'retries',
+  // interview / intake
+  'interview',
+  'mode',
+  'answers',
+  // github triage / kanban
+  'repo',
+  'label',
+  'status',
+  'max-iterations',
+  'project',
 ]);
 
 export interface ParsedArgs {

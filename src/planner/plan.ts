@@ -16,20 +16,35 @@ export interface BuildPlanOptions {
   planId?: string;
   createdAt: string;
   branch: string;
+  /** Lower bound on every slice's risk (interview-supplied). Raises, never lowers. */
+  riskFloor?: Risk;
+  /** Extra note appended to every slice (e.g. human-checkpoint provenance). */
+  extraSliceNotes?: string;
 }
 
 export function buildPlan(objective: Objective, stories: RawStory[], opts: BuildPlanOptions): Plan {
   const checkIds = objective.verification.map((c) => c.id);
   const slices: Slice[] = stories.length > 0 ? slicesFromStories(stories, checkIds) : [conservativeSlice(objective, checkIds)];
 
+  const shaped = slices.map((s) => ({
+    ...s,
+    ...(opts.riskFloor ? { risk: maxRisk(s.risk, opts.riskFloor) } : {}),
+    ...(opts.extraSliceNotes ? { notes: [s.notes, opts.extraSliceNotes].filter(Boolean).join(' ') } : {}),
+  }));
+
   const plan = {
     ...objective,
     planId: opts.planId ?? newPlanId(),
     createdAt: opts.createdAt,
-    slices,
+    slices: shaped,
   };
   // Parse through the schema so all defaults are applied and the result is valid.
   return PlanSchema.parse(plan);
+}
+
+const RISK_RANK: Record<Risk, number> = { low: 0, medium: 1, high: 2 };
+function maxRisk(a: Risk, b: Risk): Risk {
+  return RISK_RANK[a] >= RISK_RANK[b] ? a : b;
 }
 
 function slicesFromStories(stories: RawStory[], checkIds: string[]): Slice[] {

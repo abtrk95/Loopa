@@ -94,7 +94,9 @@ agent-loop status
 | Command | What it does |
 | --- | --- |
 | `init` | Scaffold `.agent-loop/` config + layout, add the local git-ignore entry. |
-| `plan --idea/--prd/--spec/--readme/--issue/--stdin` | Normalize input → objective → validated plan of slices. |
+| `plan --idea/--prd/--spec/--readme/--issue/--stdin [--interview [mode]]` | Normalize input → objective → validated plan of slices. `--interview` clarifies first. |
+| `interview [quick\|standard\|strict]` | Interview-first intake: clarify the objective, then plan. See [docs/interview-intake.md](docs/interview-intake.md). |
+| `github triage\|import\|run-issue\|watch\|project\|pr …` | GitHub triage + Kanban orchestration (dry-run by default). See [docs/github-triage-kanban.md](docs/github-triage-kanban.md). |
 | `run [--auto] [--watch]` | Execute (or approve-then-execute) the plan. `--watch` runs the live dashboard. |
 | `retry` | Resume a blocked/interrupted run; re-attempt unfinished slices only. |
 | `watch [--json/--plain/--once]` | Attach the read-only live dashboard from any terminal. |
@@ -166,6 +168,22 @@ hermetically).
 - **GitHub live-safe validation**: hermetic `gh`-stub tests prove draft-by-default, push
   only with `--push`, dedupe, and **no auto-merge/auto-deploy path**; an optional live
   test runs against a throwaway repo. See [docs/github-integration.md](docs/github-integration.md).
+- **Interview / intake wizard** (`interview`, `plan --interview quick|standard|strict`):
+  clarifies the objective before slicing (goal, acceptance/verification, forbidden areas,
+  risk, run policy). It improves planning **only** — every answer can only *strengthen*
+  safety (forbidden paths unioned, checks added, risk raised to a floor); the verifier is
+  untouched and the agent still cannot mark work done. In `--auto` it never hangs: it
+  records conservative, confidence-tagged assumptions and **blocks** only when a
+  safety-critical answer is missing (e.g. a high-risk objective with no way to verify it).
+  See [docs/interview-intake.md](docs/interview-intake.md).
+- **GitHub triage + Kanban** (`github triage|import|run-issue|watch|project|pr`):
+  classifies issues (ready / needs-info / too-risky / unsupported), comments clarification
+  questions on unclear ones, applies configurable `agent-loop:*` labels, optionally moves
+  GitHub Project (v2) cards, imports an issue into a plan, runs it through the **same local
+  deterministic loop**, and opens/updates a **draft** PR linked to the issue. Triage/watch
+  default to **dry-run**; polling is bounded (lock, max-iterations, idempotent); there is
+  **no auto-merge, auto-deploy, or issue-close** path. See
+  [docs/github-triage-kanban.md](docs/github-triage-kanban.md).
 
 **Known limitations (honest):**
 
@@ -219,7 +237,9 @@ evidence-based assessment is in
 - [docs/security-model.md](docs/security-model.md) — threat model, redaction, scope, opt-in danger flags.
 - [docs/recovery.md](docs/recovery.md) — crash recovery, resume, retry, blockers.
 - [docs/terminal-dashboard.md](docs/terminal-dashboard.md) — the watcher, layout, keys, modes.
+- [docs/interview-intake.md](docs/interview-intake.md) — the interview wizard, modes, auto-assumptions, safety.
 - [docs/github-integration.md](docs/github-integration.md) — PR creation, what we never do.
+- [docs/github-triage-kanban.md](docs/github-triage-kanban.md) — issue triage, labels, Kanban sync, watch mode.
 - [docs/operations.md](docs/operations.md) — day-to-day operating playbook.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common failures and fixes.
 - [docs/reference-analysis.md](docs/reference-analysis.md) — what we learned from prior art.
@@ -240,7 +260,7 @@ evidence-based assessment is in
 src/
   domain/        schemas (zod), state machines, errors, ids
   events/        event taxonomy, SQLite store, pure projection
-  intake/        input detection + normalization
+  intake/        input detection + normalization + interview wizard
   planner/       plan building, DAG analysis, validation
   config/        config schema + layered loader
   process/       sandboxed process manager, command tokenizer
@@ -250,7 +270,7 @@ src/
   review/        advisory model reviewer
   orchestrator/  run engine, slice executor, session, planning, control, retry, report
   watch/         dashboard renderer + watcher
-  github/        PR creation
+  github/        gh client, issue triage, labels, Project (v2) sync, watch, PRs
   security/      redaction + env secret collection
   util/          paths, fs, logger, clock, ids
 test/            unit, integration, e2e (all use the fake provider — no paid calls)

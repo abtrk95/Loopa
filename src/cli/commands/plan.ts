@@ -7,9 +7,14 @@ import { IntakeError } from '../../domain/errors.js';
 import type { Plan } from '../../domain/schemas.js';
 import type { ValidationReport } from '../../planner/validate.js';
 import { resolveInput } from '../intake-input.js';
+import { interviewRequested, interviewModeFromArgs, runInterviewPlan } from './interview.js';
 import { cliConfigOverrides, flagBool, resolveRoot, type ParsedArgs } from '../args.js';
 
 export async function cmdPlan(args: ParsedArgs): Promise<number> {
+  // `plan --interview [mode]` runs the clarifying interview before slicing.
+  if (interviewRequested(args)) {
+    return runInterviewPlan(args, interviewModeFromArgs(args));
+  }
   const root = resolveRoot(args);
   const session = openSession({ root, cliOverrides: cliConfigOverrides(args) });
   try {
