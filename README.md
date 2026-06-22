@@ -121,6 +121,21 @@ Full flags: `agent-loop --help`. Operational playbook: [docs/operations.md](docs
 > reviewer can never approve over a failed check. Nothing merges or deploys — a human
 > always decides. Guide: [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md).
 
+## Using the Claude Code skill
+
+Non-technical user? agent-loop ships a [Claude Code](https://claude.com/claude-code)
+**skill** that operates the CLI conversationally — *"add ticket search"*, *"run issue
+123"*, *"is PR 11 safe?"* — without memorizing commands. It is an **operator layer on top
+of the CLI**, not a replacement and not an authority: it runs read-only commands freely,
+**asks for confirmation before anything that writes, executes, or spends tokens**, defaults
+to dry-run/draft/concurrency-1, and explains results in plain English. It will **never**
+auto-merge, auto-deploy, close issues, bypass the verifier, or call a PR "safe to merge" —
+**the deterministic verifier remains the final authority and human review is required**.
+
+Open this repo in Claude Code and type `/agent-loop` (or just speak naturally). Files live
+under [`.claude/skills/agent-loop/`](.claude/skills/agent-loop/SKILL.md). Guide:
+[docs/claude-code-skill.md](docs/claude-code-skill.md).
+
 ## How it works (one paragraph)
 
 `intake` sniffs and normalizes your input into a validated `Objective` + user stories.
@@ -265,6 +280,7 @@ evidence-based assessment is in
 - [docs/github-integration.md](docs/github-integration.md) — PR creation, what we never do.
 - [docs/github-triage-kanban.md](docs/github-triage-kanban.md) — issue triage, labels, Kanban sync, watch mode.
 - [docs/nontechnical-pr-review.md](docs/nontechnical-pr-review.md) — **plain-English PR review for non-technical owners**: the verdicts, what still needs human judgement, the safe first-project workflow.
+- [docs/claude-code-skill.md](docs/claude-code-skill.md) — **the Claude Code operator skill**: drive agent-loop conversationally, safely, as a non-technical user.
 - [docs/operations.md](docs/operations.md) — day-to-day operating playbook.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common failures and fixes.
 - [docs/reference-analysis.md](docs/reference-analysis.md) — what we learned from prior art.
