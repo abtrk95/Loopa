@@ -1,4 +1,12 @@
+<div align="center">
+
+<img src="assets/loopa-hero.png" alt="Loopa — Autonomous. Verifiable. Repeatable. Agent loop orchestration for reliable software delivery." width="100%">
+
+</div>
+
 # agent-loop
+
+> **Loopa** is the brand for `agent-loop` — the package and CLI keep the `agent-loop` name.
 
 **A local-first, autonomous coding loop where the AI agent is a worker — not the source of truth.**
 
@@ -318,6 +326,18 @@ src/
 test/            unit, integration, e2e (all use the fake provider — no paid calls)
 docs/            this documentation set
 ```
+
+## Brand
+
+<div align="center">
+
+<img src="assets/loopa-logo.png" alt="Loopa logo" width="180">
+
+</div>
+
+Brand assets live in [`assets/`](assets/): the hero banner (`loopa-hero.png`) and the logo
+(`loopa-logo.png`). To use the logo as the repo's preview when shared, upload it under
+**Settings → General → Social preview** (GitHub only accepts this via the web UI).
 
 ## Licensing
 
