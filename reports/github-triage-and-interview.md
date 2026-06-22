@@ -110,9 +110,31 @@ agent-loop github pr         create|update --repo o/n [--issue N] [--push] [--no
 - Interview planning remains deterministic (no model-driven slicing) — consistent with
   the existing "planner provider is accepted but not executed" limitation.
 
+## Adversarial safety audit
+
+A 4-lens adversarial audit (outward-actions / verifier-integrity / injection /
+correctness; 17 agents, every finding independently re-verified) was run over the new
+code. Confirmed real findings were fixed:
+
+- **Risk floor (most important).** A declared/`--answers` risk no longer sets a story's
+  risk directly; it is applied as a FLOOR in `buildPlan` (raises over the heuristic). A
+  high-risk goal tagged "low" still plans as high and still trips the safety-critical
+  block. Regression-tested.
+- **GraphQL injection surface.** The Project status-field name is now a GraphQL variable,
+  not string-interpolated.
+- **Label-op robustness.** `ensureLabel` before `addLabels`, best-effort `removeLabels`,
+  and per-issue try/catch so one issue's write failure can't crash a triage/watch pass.
+- **run-issue lock ordering.** The run lock is acquired before any GitHub writes.
+- **`--answers` coercion.** Malformed answer files degrade gracefully.
+
+Findings left as by-design (documented): the standalone `pr create` is an explicit
+apply-by-default action (no `--force`; the new `github pr`/`run-issue` paths honor
+`--dry-run`); project-sync `ok` in dry-run is disambiguated by the `dryRun` flag.
+
 ## Status
 
-Baseline smoke gate passed; interview + GitHub triage/Kanban implemented and tested
-hermetically; full `npm run check` + build + audit + pack green. Product status is
-unchanged: **limited production with mandatory human review** — the additions are
-local-first and safety-first and do not introduce any auto-merge/deploy path.
+Baseline smoke gate passed; interview + GitHub triage/Kanban implemented, tested
+hermetically, and adversarially audited; full `npm run check` (197 passed / 5 skipped) +
+build + demo + audit (0 vulns) + pack green. Product status is unchanged: **limited
+production with mandatory human review** — the additions are local-first and safety-first
+and introduce no auto-merge/deploy/issue-close path.
