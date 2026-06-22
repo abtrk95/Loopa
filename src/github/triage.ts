@@ -69,10 +69,46 @@ export function issueCheckboxes(body: string): string[] {
     .filter(Boolean);
 }
 
+const AC_HEADING_RE = /\b(acceptance criteria|success criteria|requirements|done when|definition of done)\b/i;
+
+/**
+ * Extract acceptance criteria from an issue body. Recognizes BOTH GitHub task-list
+ * checkboxes (`- [ ] ...`) anywhere AND plain bullet points (`- ...` / `* ...`)
+ * that appear under an "Acceptance criteria"-style heading. The latter is by far
+ * the most common way people (especially non-technical authors) write criteria, and
+ * missing it caused well-specified issues to be misclassified as needs-info/too-risky.
+ */
+export function issueAcceptanceCriteria(body: string): string[] {
+  const lines = body.split('\n');
+  const out: string[] = [];
+  for (const l of lines) {
+    if (/^\s*[-*]\s*\[[ xX]\]/.test(l)) {
+      const t = l.replace(/^\s*[-*]\s*\[[ xX]\]\s*/, '').trim();
+      if (t) out.push(t);
+    }
+  }
+  let inAC = false;
+  for (const l of lines) {
+    const heading = l.match(/^\s*#{1,6}\s*(.+?)\s*$/);
+    if (heading) {
+      inAC = AC_HEADING_RE.test(heading[1]!);
+      continue;
+    }
+    if (!inAC) continue;
+    if (/^\s*[-*]\s+\S/.test(l)) {
+      const t = l.replace(/^\s*[-*]\s*(\[[ xX]\]\s*)?/, '').trim();
+      if (t) out.push(t);
+    } else if (l.trim() && !/^\s*[-*]/.test(l)) {
+      inAC = false; // a non-bullet, non-empty line closes the section
+    }
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+
 /** Pure classification — no network. */
 export function classifyIssue(issue: GhIssue, mode: InterviewMode): TriageResult {
   const body = (issue.body ?? '').trim();
-  const checkboxes = issueCheckboxes(body);
+  const checkboxes = issueAcceptanceCriteria(body);
   const hasAC = checkboxes.length > 0;
   const detailed = body.length >= MIN_DETAIL;
   const risk = heuristicRisk(`${issue.title} ${body}`);

@@ -231,6 +231,7 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
             draft: !flagBool(args, 'no-draft') && cfg.draftPr,
             push,
             sourceIssue: issueNum,
+            plan: planned.plan,
             ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
           },
           snap,
@@ -407,6 +408,7 @@ async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
   try {
     const snap = projectEvents(store.read(meta.runId));
     const issueNum = flagNum(args, 'issue');
+    const plan = loadPlan(session.paths);
     const opts = {
       root: session.root,
       branch: meta.branch,
@@ -414,6 +416,7 @@ async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
       draft: !flagBool(args, 'no-draft') && cfg.draftPr,
       push: flagBool(args, 'push'),
       ...(issueNum !== undefined ? { sourceIssue: issueNum } : {}),
+      ...(plan ? { plan } : {}),
       ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
     };
     if (flagBool(args, 'dry-run')) {

@@ -8,6 +8,7 @@ import { GitError } from '../domain/errors.js';
 import type { RunSnapshot } from '../events/projection.js';
 import { progressPercent } from '../events/projection.js';
 import { renderHumanReviewSection } from './pr-review.js';
+import type { Plan } from '../domain/schemas.js';
 
 export interface CreatePrOptions {
   root: string;
@@ -18,6 +19,9 @@ export interface CreatePrOptions {
   baseBranch?: string;
   /** Source GitHub issue to reference (Refs #N — never "Closes", to avoid auto-close). */
   sourceIssue?: number;
+  /** The run's plan, so the PR body's human-review section reports the SAME risk
+   * level as the full `pr review` report (the snapshot alone has no slice risk). */
+  plan?: Plan;
 }
 
 export interface CreatePrResult {
@@ -49,7 +53,7 @@ export async function createPullRequest(opts: CreatePrOptions, snapshot: RunSnap
     }
   }
 
-  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue), '--head', opts.branch];
+  const args = ['pr', 'create', '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue, opts.plan), '--head', opts.branch];
   if (opts.draft) args.push('--draft');
   if (opts.baseBranch) args.push('--base', opts.baseBranch);
   const res = await pm.run(['gh', ...args], { cwd: opts.root, timeoutMs: 60_000 });
@@ -84,7 +88,7 @@ export async function updatePullRequest(opts: CreatePrOptions, snapshot: RunSnap
   if (!existing) {
     return createPullRequest(opts, snapshot, pm);
   }
-  const editArgs = ['pr', 'edit', String(existing.number), '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue)];
+  const editArgs = ['pr', 'edit', String(existing.number), '--title', prTitle(snapshot), '--body', prBody(snapshot, opts.sourceIssue, opts.plan)];
   const res = await pm.run(['gh', ...editArgs], { cwd: opts.root, timeoutMs: 60_000 });
   if (!res.ok) {
     throw new GitError(`gh pr edit failed (exit ${res.exitCode}).`, { details: { stderr: res.stderr.slice(0, 500) } });
@@ -96,7 +100,7 @@ function prTitle(s: RunSnapshot): string {
   return `agent-loop: ${s.goal.slice(0, 80)}`;
 }
 
-function prBody(s: RunSnapshot, sourceIssue?: number): string {
+function prBody(s: RunSnapshot, sourceIssue?: number, plan?: Plan): string {
   const blocked = s.blocker ? [`**Blocked:** ${s.blocker.reason}`, ``] : [];
   const lines = [
     `## Summary`,
@@ -105,7 +109,8 @@ function prBody(s: RunSnapshot, sourceIssue?: number): string {
     ``,
     // Plain-English, non-technical human-review section up top (verdict, checks,
     // risk, manual checklist, and the explicit "no auto-merge / human review" banner).
-    renderHumanReviewSection(s, sourceIssue !== undefined ? { sourceIssue } : {}),
+    // The plan is threaded through so risk matches the full `pr review` report.
+    renderHumanReviewSection(s, { ...(plan ? { plan } : {}), ...(sourceIssue !== undefined ? { sourceIssue } : {}) }),
     ``,
     `<details>`,
     `<summary>Technical details</summary>`,

@@ -147,6 +147,26 @@ describe('classifyIssue', () => {
     expect(r.status).toBe('needs-info');
     expect(r.clarifications.length).toBeGreaterThan(0);
   });
+
+  it('recognizes bullet-list acceptance criteria under a heading (not just checkboxes)', () => {
+    // Regression: an issue that lists criteria as plain bullets under an
+    // "## Acceptance criteria" heading was misread as having NO criteria, and (when
+    // it also named protected paths like ".env"/"secrets" as do-not-touch notes) the
+    // high-risk heuristic then mislabeled a well-specified issue as too-risky.
+    const body = [
+      '## Summary',
+      'Add a search box above the ticket list.',
+      '',
+      '## Acceptance criteria',
+      '- A text input labelled "Search" appears above the list.',
+      '- Typing filters tickets by customer name (case-insensitive).',
+      '- An empty search shows all tickets.',
+      '- No forbidden files (.env, secrets/**, infra/production/**) are modified.',
+    ].join('\n');
+    const r = classifyIssue({ number: 6, title: 'Add ticket search by customer name', body, labels: [] }, 'quick');
+    expect(r.status).toBe('ready');
+    expect(r.reasons.join(' ')).toMatch(/acceptance criteri/i);
+  });
 });
 
 describe('triageRepo', () => {
