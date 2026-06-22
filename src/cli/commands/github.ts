@@ -41,7 +41,7 @@ const USAGE = `Usage: agent-loop github <command>
 
   triage    --repo o/n [--dry-run|--apply] [--issue N] [--comment] [--all] [--mode quick|standard|strict]
   import    --repo o/n --issue N [--interview [mode]] [--accept-recommended] [--write-config] [--auto]
-  run-issue --repo o/n --issue N [--auto] [--apply] [--pr] [--project] [--interview] [--accept-recommended]
+  run-issue --repo o/n --issue N [--auto] [--apply] [--pr [--no-push]] [--project] [--interview] [--accept-recommended]
   watch     --repo o/n [--once] [--dry-run|--apply] [--interval N] [--max-iterations N] [--comment] [--project]
   project   sync --repo o/n --issue N [--status <column>] [--dry-run|--apply]
   pr        create|update --repo o/n [--issue N] [--push] [--no-draft] [--base B] [--remote R] [--dry-run]
@@ -207,11 +207,14 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
 
     await setRunStatus(client, cfg, repo, issueNum, labelSet, finalState, syncProject, warnings);
 
-    // Optional draft PR (explicit; never merges/deploys).
+    // Optional draft PR (explicit; never merges/deploys). The run created the branch
+    // locally this invocation, so a PR REQUIRES pushing it first: push by default and
+    // let `--no-push` opt out (e.g. when the branch is already on the remote).
     if (flagBool(args, 'pr')) {
       const snap = projectEvents(session.store.read(meta.runId));
+      const push = !flagBool(args, 'no-push');
       if (dryRun) {
-        process.stderr.write(`  [gh DRY-RUN] pr upsert: draft PR for ${meta.branch} (Refs #${issueNum})\n`);
+        process.stderr.write(`  [gh DRY-RUN] pr upsert: ${push ? 'push + ' : ''}draft PR for ${meta.branch} (Refs #${issueNum})\n`);
       } else {
         const pr = await updatePullRequest(
           {
@@ -219,7 +222,7 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
             branch: meta.branch ?? snap.branch,
             remote: flagStr(args, 'remote') ?? cfg.remote,
             draft: !flagBool(args, 'no-draft') && cfg.draftPr,
-            push: flagBool(args, 'push'),
+            push,
             sourceIssue: issueNum,
             ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
           },

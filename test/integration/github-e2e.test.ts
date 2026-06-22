@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../../src/cli/args.js';
@@ -143,6 +144,13 @@ describe('combined GitHub → plan → run → PR (hermetic)', () => {
     const stub = ghStub();
     process.env['PATH'] = `${stub.dir}:${savedPath}`;
     const root = tempRepo();
+    // A real bare remote named `origin` so `run-issue --pr` exercises the actual
+    // `git push -u origin <branch>` (a PR cannot exist for a local-only branch). The
+    // gh stub still intercepts `gh pr create`; only the push is real.
+    const bare = mkdtempSync(join(tmpdir(), 'al-bare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '--bare', '-q', bare]);
+    execFileSync('git', ['-C', root, 'remote', 'add', 'origin', bare]);
     // Deterministic implementation for the single slice the issue produces.
     writeFakeScript(root, { slices: { 'S-001': { files: { 'src/csv.js': 'export const toCsv = (r) => r.join(",");\n' } } }, reviews: {} });
 
@@ -192,6 +200,13 @@ describe('combined GitHub → plan → run → PR (hermetic)', () => {
     expect(calls.some((c) => c.startsWith('pr create') && c.includes('--draft'))).toBe(true); // draft PR
     expect(calls.some((c) => c.startsWith('pr create') && /Refs #10/.test(c))).toBe(true); // linked to issue
     expect(calls.some((c) => c.includes('updateProjectV2ItemFieldValue'))).toBe(true); // board moved
+
+    // run-issue --pr pushed the run branch by default (a PR needs the branch on the
+    // remote) — proven against the real bare remote, not the gh stub.
+    const meta2 = loadRunMeta(paths)!;
+    const remoteBranches = execFileSync('git', ['-C', bare, 'branch', '--format=%(refname:short)'], { encoding: 'utf8' });
+    expect(meta2.branch).toBeTruthy();
+    expect(remoteBranches).toContain(meta2.branch!);
     for (const v of verbs) {
       expect(/merge|deploy/.test(v), `unexpected verb: ${v}`).toBe(false);
       expect(v).not.toBe('issue close');
