@@ -32,6 +32,7 @@ import {
   type Recommendation,
 } from '../../intake/recommend.js';
 import { deepMerge } from '../../config/load.js';
+import { CommandProvider, presetSpec, PRESET_PROVIDER_IDS } from '../../providers/command.js';
 import { atomicWrite } from '../../util/fs.js';
 import { IntakeError } from '../../domain/errors.js';
 import { ReadlinePrompter, canPromptInteractively } from '../prompter.js';
@@ -209,7 +210,10 @@ async function buildRecommendInputs(
 
 async function collectProviderInfo(session: Session): Promise<ProviderInfo[]> {
   const out: ProviderInfo[] = [];
-  for (const adapter of session.registry.all()) {
+  const seen = new Set<string>();
+  const probe = async (adapter: { id: string; health(): Promise<{ ok: boolean }>; capabilities(): { roles: readonly string[] } }): Promise<void> => {
+    if (seen.has(adapter.id)) return;
+    seen.add(adapter.id);
     let installed = false;
     try {
       installed = (await adapter.health()).ok;
@@ -217,6 +221,16 @@ async function collectProviderInfo(session: Session): Promise<ProviderInfo[]> {
       installed = false;
     }
     out.push({ id: adapter.id, installed, roles: [...adapter.capabilities().roles] });
+  };
+
+  for (const adapter of session.registry.all()) await probe(adapter);
+  // Also probe the known real-CLI presets even when config still defaults to `fake`,
+  // so the interview can recommend an installed provider (e.g. claude) that the user
+  // has not configured yet.
+  for (const id of PRESET_PROVIDER_IDS) {
+    if (seen.has(id)) continue;
+    const spec = presetSpec(id);
+    if (spec) await probe(new CommandProvider(spec, session.pm));
   }
   return out;
 }

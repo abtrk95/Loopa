@@ -126,6 +126,9 @@ export class CommandProvider implements ProviderAdapter {
 
 const ALL_ROLES: Role[] = ['planner', 'worker', 'reviewer', 'fixer', 'judge'];
 
+/** Ids of the built-in real-CLI presets (probed by `doctor`/the interview). */
+export const PRESET_PROVIDER_IDS = ['claude', 'codex', 'opencode'] as const;
+
 /** Built-in presets. Commands are deliberately minimal & safe; override via config. */
 export function presetSpec(id: string): CommandAdapterSpec | undefined {
   switch (id) {
