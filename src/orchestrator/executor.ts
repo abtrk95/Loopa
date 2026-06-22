@@ -392,7 +392,20 @@ async function maybeReview(
       source: 'reviewer',
       sliceId: slice.id,
       attemptId,
-      payload: { provider: rsel.provider, model: rsel.model ?? null, verdict: outcome.verdict.verdict, malformed: outcome.malformed, findings: outcome.verdict.findings.length, index: i, of: count },
+      payload: {
+        provider: rsel.provider,
+        model: rsel.model ?? null,
+        verdict: outcome.verdict.verdict,
+        malformed: outcome.malformed,
+        findings: outcome.verdict.findings.length,
+        // Surface finding detail + the plain-English product-owner layer so the
+        // non-technical PR review report can render them (advisory; the verifier
+        // remains the sole completion authority). Payloads are redacted by the store.
+        findingsDetail: outcome.verdict.findings,
+        ...(outcome.verdict.productOwnerSummary ? { productOwnerSummary: outcome.verdict.productOwnerSummary } : {}),
+        index: i,
+        of: count,
+      },
     });
     verdicts.push(outcome.verdict.verdict);
     if (outcome.verdict.verdict === 'blocked') break;

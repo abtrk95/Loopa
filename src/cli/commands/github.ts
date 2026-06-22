@@ -12,13 +12,17 @@
  * auto-merges, auto-deploys, closes issues, or bypasses the verifier. Triage,
  * watch, and project sync default to DRY-RUN; every external write is logged.
  */
-import { openSession, loadRunMeta, type Session } from '../../orchestrator/session.js';
+import { join } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { openSession, loadRunMeta, loadPlan, type Session } from '../../orchestrator/session.js';
 import { createPlan } from '../../orchestrator/planning.js';
 import { RunEngine } from '../../orchestrator/run.js';
 import { acquireRunLock, releaseRunLock } from '../../process/pidfile.js';
 import { project as projectEvents } from '../../events/projection.js';
 import { SqliteEventStore } from '../../events/store.js';
 import { GhClient, type GhWrite } from '../../github/client.js';
+import { buildPrReview, renderPrReviewMarkdown, type PrMeta } from '../../github/pr-review.js';
+import { atomicWrite, PRIVATE_FILE_MODE } from '../../util/fs.js';
 import { triageRepo } from '../../github/triage.js';
 import {
   statusLabelForRunState,
@@ -45,8 +49,11 @@ const USAGE = `Usage: agent-loop github <command>
   watch     --repo o/n [--once] [--dry-run|--apply] [--interval N] [--max-iterations N] [--comment] [--project]
   project   sync --repo o/n --issue N [--status <column>] [--dry-run|--apply]
   pr        create|update --repo o/n [--issue N] [--push] [--no-draft] [--base B] [--remote R] [--dry-run]
+  pr review --repo o/n [--pr N] [--issue N] [--comment] [--apply] [--json]
 
 Triage / watch / project sync default to DRY-RUN. Nothing auto-merges or deploys.
+'pr review' builds a plain-English, evidence-based review report (read-only by
+default; posts a PR comment only with --comment --apply).
 `;
 
 export async function cmdGithub(args: ParsedArgs): Promise<number> {
@@ -387,8 +394,11 @@ async function githubProject(session: Session, args: ParsedArgs): Promise<number
 async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
   const cfg = session.config.github;
   const action = args.positionals[1];
+  if (action === 'review' || action === 'explain') {
+    return githubPrReview(session, args);
+  }
   if (action !== 'create' && action !== 'update') {
-    process.stdout.write('Usage: agent-loop github pr <create|update> --repo o/n [--issue N] [--push] [--no-draft]\n');
+    process.stdout.write('Usage: agent-loop github pr <create|update|review> --repo o/n [--issue N] [--pr N] [--push] [--no-draft] [--comment] [--apply]\n');
     return action ? 1 : 0;
   }
   const meta = loadRunMeta(session.paths);
@@ -423,4 +433,138 @@ async function githubPr(session: Session, args: ParsedArgs): Promise<number> {
   } finally {
     store.close();
   }
+}
+
+// --- pr review (plain-English, evidence-based; read-only by default) ---------
+
+/**
+ * Build a non-technical PR review report from OBJECTIVE local run evidence (event
+ * log + plan + snapshot), optionally enriched with read-only PR metadata. The
+ * report is written to `.agent-loop/reports/pr-review-<pr|branch>.md`. Posting a PR
+ * comment requires `--comment` AND follows the dry-run convention (`--apply` to
+ * actually write). It never merges, deploys, approves, or closes anything.
+ */
+async function githubPrReview(session: Session, args: ParsedArgs): Promise<number> {
+  const cfg = session.config.github;
+  const wantComment = flagBool(args, 'comment');
+  const dryRun = !flagBool(args, 'apply'); // posting is a write → DRY-RUN unless --apply
+  const prNum = flagNum(args, 'pr');
+  const warnings: string[] = [];
+
+  // 1) Local run evidence (authoritative).
+  const meta = loadRunMeta(session.paths);
+  const events = meta ? session.store.read(meta.runId) : [];
+  const snap = projectEvents(events);
+  const plan = loadPlan(session.paths);
+
+  // 2) Optional PR metadata enrichment (read-only).
+  let pr: PrMeta | undefined;
+  let repo: string | undefined;
+  if (prNum !== undefined) {
+    repo = resolveRepo(args, cfg);
+    const reader = makeClient(session, true);
+    try {
+      const ghpr = await reader.viewPr(repo, prNum);
+      pr = {
+        number: ghpr.number,
+        url: ghpr.url,
+        state: ghpr.state,
+        isDraft: ghpr.isDraft,
+        headRefName: ghpr.headRefName,
+        ...(ghpr.baseRefName ? { baseRefName: ghpr.baseRefName } : {}),
+        files: ghpr.files,
+        commits: ghpr.commits,
+      };
+      if (snap.branch && ghpr.headRefName && snap.branch !== ghpr.headRefName) {
+        warnings.push(`local run branch '${snap.branch}' != PR head '${ghpr.headRefName}' — local evidence may belong to a different change.`);
+      }
+    } catch (err) {
+      warnings.push(`could not fetch PR #${prNum}: ${(err as Error).message}`);
+    }
+  }
+
+  const browserArtifacts = listBrowserArtifacts(session.paths.uiSmokeDir, session.root);
+  const sourceIssue = flagNum(args, 'issue') ?? sourceIssueFromPlan(plan);
+  const report = buildPrReview({
+    events,
+    snapshot: snap,
+    plan,
+    ...(sourceIssue !== undefined ? { sourceIssue } : {}),
+    browserArtifacts,
+    ...(pr ? { pr } : {}),
+  });
+  const md = session.redactor.redact(renderPrReviewMarkdown(report));
+
+  const tag = prNum !== undefined ? String(prNum) : snap.branch ? safeTag(snap.branch) : 'local';
+  const outPath = join(session.paths.reportsDir, `pr-review-${tag}.md`);
+  atomicWrite(outPath, md, { mode: PRIVATE_FILE_MODE });
+
+  if (flagBool(args, 'json')) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          verdict: report.verdict,
+          riskLevel: report.riskLevel,
+          recommendation: report.recommendation,
+          reasons: report.reasons,
+          concerns: report.concerns,
+          manualChecks: report.manualChecks,
+          generatedFrom: report.generatedFrom,
+          reportPath: outPath,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  } else {
+    process.stdout.write(`\nPR review verdict: ${report.verdict}  (risk: ${report.riskLevel})\n`);
+    process.stdout.write(`${report.recommendation}\n`);
+    process.stdout.write(`Report: ${outPath}\n`);
+  }
+  for (const w of warnings) process.stderr.write(`  warning: ${w}\n`);
+
+  // 3) Optional PR comment — requires --comment; default DRY-RUN unless --apply.
+  if (wantComment) {
+    if (prNum === undefined || !repo) {
+      process.stderr.write('  warning: --comment needs --pr N and --repo owner/name; no comment posted.\n');
+    } else {
+      const writer = makeClient(session, dryRun);
+      await writer.commentPr(repo, prNum, md);
+      process.stdout.write(
+        dryRun
+          ? '\n(DRY-RUN) Would post this report as a PR comment. Re-run with --apply to post.\n'
+          : '\nPosted the report as a PR comment.\n',
+      );
+    }
+  } else {
+    process.stdout.write('\nRead-only: no PR comment was posted. Add --comment --apply to post this report to the PR.\n');
+  }
+  return 0;
+}
+
+/** List browser/UI evidence artifacts (screenshots / page snapshots), root-relative. */
+function listBrowserArtifacts(uiSmokeDir: string, root: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(uiSmokeDir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => /\.(png|html)$/i.test(n))
+    .sort()
+    .map((n) => join(uiSmokeDir, n).replace(root + '/', ''));
+}
+
+/** Derive the source issue number from the plan's provenance (e.g. ref "#7"). */
+function sourceIssueFromPlan(plan: ReturnType<typeof loadPlan>): number | undefined {
+  const ref = plan?.source?.ref;
+  if (!ref) return undefined;
+  const m = ref.match(/#?(\d+)/);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** Filesystem-safe tag from a branch name. */
+function safeTag(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'local';
 }

@@ -7,6 +7,7 @@ import { ProcessManager } from '../process/manager.js';
 import { GitError } from '../domain/errors.js';
 import type { RunSnapshot } from '../events/projection.js';
 import { progressPercent } from '../events/projection.js';
+import { renderHumanReviewSection } from './pr-review.js';
 
 export interface CreatePrOptions {
   root: string;
@@ -102,21 +103,30 @@ function prBody(s: RunSnapshot, sourceIssue?: number): string {
     `Autonomous implementation by agent-loop.`,
     ...(sourceIssue ? [``, `Refs #${sourceIssue}`] : []), // Refs (not Closes) — never auto-closes the issue.
     ``,
+    // Plain-English, non-technical human-review section up top (verdict, checks,
+    // risk, manual checklist, and the explicit "no auto-merge / human review" banner).
+    renderHumanReviewSection(s, sourceIssue !== undefined ? { sourceIssue } : {}),
+    ``,
+    `<details>`,
+    `<summary>Technical details</summary>`,
+    ``,
     `**Verified progress:** ${s.verifiedCompleted}/${s.totalSlices} slices (${progressPercent(s)}%)`,
     `**Run state:** ${s.runState}`,
     ``,
     ...blocked,
-    `## Slices`,
+    `### Slices`,
     ...s.sliceOrder.map((id) => {
       const slice = s.slices[id];
       return slice ? `- ${id} ${slice.title} — ${slice.state}${slice.lastCommit ? ` (${slice.lastCommit.slice(0, 8)})` : ''}` : '';
     }),
     ``,
-    `## Checks run`,
+    `### Checks run`,
     ...(s.checks.length ? s.checks.map((c) => `- ${c.id}: ${c.state}`) : ['- (see run report)']),
     ``,
+    `</details>`,
+    ``,
     `> Completion is derived from deterministic verification + scoped commits, not agent claims.`,
-    `> Review before merging. agent-loop does not auto-merge or deploy.`,
+    `> Review before merging. agent-loop does not auto-merge, deploy, or close the issue.`,
   ];
   return lines.join('\n');
 }

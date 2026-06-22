@@ -31,6 +31,7 @@ const VALUE_FLAGS = new Set([
   'status',
   'max-iterations',
   'project',
+  'pr',
 ]);
 
 export interface ParsedArgs {

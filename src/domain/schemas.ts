@@ -236,11 +236,36 @@ export const ReviewFindingSchema = z
   .strict();
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
 
+/**
+ * The reviewer's second, plain-language layer aimed at a non-technical product
+ * owner. It explains the change in everyday terms, says whether the behavior
+ * matches the issue, lists what to test by hand, and gives a merge suggestion.
+ * It is ADVISORY only — `mergeRecommendation` can never upgrade a deterministic
+ * verifier failure (the report-level verdict enforces that precedence).
+ */
+export const ProductOwnerSummarySchema = z
+  .object({
+    /** One or two plain sentences: what this change does for a user. */
+    whatChanged: z.string().min(1),
+    /** Does the observed behavior match what the issue asked for? */
+    matchesIntent: z.enum(['yes', 'partly', 'no', 'unsure']),
+    /** Concrete by-hand checks a non-technical reviewer can perform. */
+    whatToManuallyTest: z.array(z.string().min(1)).default([]),
+    /** Plain-English risk explanation (no jargon). */
+    riskExplanation: z.string().default(''),
+    /** Advisory merge suggestion (NEVER authoritative over the verifier). */
+    mergeRecommendation: z.enum(['merge_after_check', 'ask_developer', 'do_not_merge', 'unsure']),
+  })
+  .strict();
+export type ProductOwnerSummary = z.infer<typeof ProductOwnerSummarySchema>;
+
 export const ReviewVerdictSchema = z
   .object({
     verdict: z.enum(['pass', 'changes_requested', 'blocked']),
     findings: z.array(ReviewFindingSchema).default([]),
     summary: z.string().optional(),
+    /** Optional plain-English layer for non-technical reviewers (advisory). */
+    productOwnerSummary: ProductOwnerSummarySchema.optional(),
   })
   .strict();
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;

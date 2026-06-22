@@ -22,6 +22,17 @@ export interface GhIssue {
   state?: string;
 }
 
+export interface GhPr {
+  number: number;
+  url: string;
+  state: string;
+  isDraft: boolean;
+  headRefName: string;
+  baseRefName?: string;
+  files: string[];
+  commits: number;
+}
+
 export interface GhWrite {
   action: string;
   detail: string;
@@ -88,6 +99,45 @@ export class GhClient {
     const issue = parsed[0];
     if (!issue) throw new GitError(`could not parse issue #${number} from gh output`);
     return issue;
+  }
+
+  /** Read PR metadata (read-only; mutates nothing). There is deliberately NO merge,
+   * NO close, and NO ready-for-review verb on this client. */
+  async viewPr(repo: string, number: number): Promise<GhPr> {
+    const res = await this.read(
+      ['pr', 'view', String(number), '--repo', repo, '--json', 'number,url,state,isDraft,headRefName,baseRefName,files,commits'],
+      `view PR #${number}`,
+    );
+    let o: Record<string, unknown>;
+    try {
+      o = JSON.parse(res) as Record<string, unknown>;
+    } catch {
+      throw new GitError(`could not parse PR #${number} from gh output`);
+    }
+    const files = Array.isArray(o['files'])
+      ? (o['files'] as unknown[]).map((f) => (f && typeof f === 'object' ? ((f as Record<string, unknown>)['path'] as string) : undefined)).filter((x): x is string => !!x)
+      : [];
+    const commits = Array.isArray(o['commits']) ? (o['commits'] as unknown[]).length : 0;
+    return {
+      number: typeof o['number'] === 'number' ? (o['number'] as number) : number,
+      url: typeof o['url'] === 'string' ? (o['url'] as string) : '',
+      state: typeof o['state'] === 'string' ? (o['state'] as string) : '',
+      isDraft: o['isDraft'] === true,
+      headRefName: typeof o['headRefName'] === 'string' ? (o['headRefName'] as string) : '',
+      ...(typeof o['baseRefName'] === 'string' ? { baseRefName: o['baseRefName'] as string } : {}),
+      files,
+      commits,
+    };
+  }
+
+  /** Post a comment on a PR. A WRITE — gated by `dryRun` like every other write
+   * (in dry-run the gh process is never spawned; intent is reported via onWrite). */
+  async commentPr(repo: string, number: number, body: string): Promise<void> {
+    await this.write(
+      ['pr', 'comment', String(number), '--repo', repo, '--body', body],
+      'pr-comment',
+      `PR #${number}: ${firstLine(body)}`,
+    );
   }
 
   /** Run `gh api graphql`; returns parsed JSON (or throws GitError). Read-only by
