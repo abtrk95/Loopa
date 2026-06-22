@@ -20,6 +20,11 @@ export async function cmdDoctor(args: ParsedArgs): Promise<number> {
     if (!pass) ok = false;
     out.write(`  ${pass ? '✓' : '✗'} ${label.padEnd(22)} ${detail}\n`);
   };
+  // A non-failing advisory line (e.g. an optional provider that isn't installed):
+  // shown with a distinct marker so a green ✓ never misrepresents an absent tool.
+  const warnLine = (label: string, detail: string): void => {
+    out.write(`  ! ${label.padEnd(22)} ${detail}\n`);
+  };
 
   out.write('agent-loop doctor\n\n');
 
@@ -51,9 +56,13 @@ export async function cmdDoctor(args: ParsedArgs): Promise<number> {
     const registry = createRegistry(config, root, pm);
     for (const adapter of registry.all()) {
       const health = await adapter.health();
-      // The fake provider is always healthy; real providers may be absent — that's a
-      // warning, not a hard failure (you may only use some of them).
-      line(`provider:${adapter.id}`, adapter.id === 'fake' ? health.ok : true, health.detail ?? (health.ok ? 'ok' : 'not installed'));
+      const detail = health.detail ?? (health.ok ? 'ok' : 'not installed');
+      // The fake provider is always healthy; a real provider may be absent — that's a
+      // non-failing advisory (you may only use some of them), shown with `!` rather
+      // than a misleading green ✓.
+      if (adapter.id === 'fake') line(`provider:${adapter.id}`, health.ok, detail);
+      else if (health.ok) line(`provider:${adapter.id}`, true, detail);
+      else warnLine(`provider:${adapter.id}`, detail);
     }
   }
 

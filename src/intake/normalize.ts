@@ -6,6 +6,7 @@
  */
 import type { Objective, Criterion } from '../domain/schemas.js';
 import { ObjectiveSchema } from '../domain/schemas.js';
+import { IntakeError } from '../domain/errors.js';
 import { detectStack } from './detect.js';
 
 export type InputKind = 'idea' | 'prd-md' | 'prd-json' | 'spec' | 'readme' | 'issue' | 'stdin';
@@ -42,6 +43,13 @@ export interface NormalizeOptions {
 }
 
 export function normalizeInput(input: RawInput, opts: NormalizeOptions): NormalizeResult {
+  // Boundary validation: reject empty/whitespace input clearly instead of silently
+  // producing a meaningless placeholder plan.
+  if (!input.text || input.text.trim() === '') {
+    throw new IntakeError(
+      `empty ${input.ref ? `input '${input.ref}'` : `${input.kind} input`}: provide a non-empty idea/PRD/spec/README/issue/stdin`,
+    );
+  }
   const detected = detectStack(opts.root);
   const assumptions: string[] = [];
   const branch = opts.defaultBranch ?? 'main';
@@ -125,9 +133,20 @@ function parseByKind(kind: InputKind, text: string): Parsed {
 }
 
 function parseJsonPrd(text: string): Parsed {
-  const json = JSON.parse(text) as Record<string, unknown>;
-  const goal =
-    str(json['goal']) ?? str(json['description']) ?? str(json['project']) ?? str(json['title']) ?? 'Implement the PRD';
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    throw new IntakeError(`PRD is not valid JSON: ${(err as Error).message}`);
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new IntakeError(
+      'PRD JSON must be an object with a goal/description/project/title and/or a userStories array',
+    );
+  }
+  const json = raw as Record<string, unknown>;
+  const explicitGoal = str(json['goal']) ?? str(json['description']) ?? str(json['project']) ?? str(json['title']);
+  const goal = explicitGoal ?? 'Implement the PRD';
   const background = str(json['background']) ?? '';
   const constraints = strArray(json['constraints']);
   const nonGoals = strArray(json['nonGoals']) ?? strArray(json['non_goals']) ?? [];
@@ -149,6 +168,11 @@ function parseJsonPrd(text: string): Parsed {
       ...(isRisk(r['risk']) ? { risk: r['risk'] as RawStory['risk'] } : {}),
       ...(typeof r['parallelSafe'] === 'boolean' ? { parallelSafe: r['parallelSafe'] } : {}),
     });
+  }
+  if (!explicitGoal && stories.length === 0) {
+    throw new IntakeError(
+      'PRD JSON has no goal/description/project/title and no userStories — nothing to plan',
+    );
   }
   return { goal, background, constraints: constraints ?? [], nonGoals, stories };
 }

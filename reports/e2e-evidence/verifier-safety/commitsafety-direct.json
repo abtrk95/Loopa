@@ -1,0 +1,31 @@
+{
+  "gitlink": {
+    "ok": false,
+    "reason": "submodule change",
+    "findings": [
+      {
+        "severity": "fail",
+        "detail": "submodule change: vendor"
+      }
+    ]
+  },
+  "symlinkEscape": {
+    "ok": false,
+    "reason": "symlink-escape detected",
+    "findings": [
+      {
+        "severity": "block",
+        "detail": "symlink-escape: escape.lnk"
+      }
+    ]
+  },
+  "symlinkInTree": {
+    "ok": true,
+    "findings": [
+      {
+        "severity": "flag",
+        "detail": "symlink: link.txt"
+      }
+    ]
+  }
+}

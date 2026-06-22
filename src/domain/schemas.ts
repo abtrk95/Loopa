@@ -111,12 +111,31 @@ export const RiskPolicySchema = z
     allowLockfileChanges: z.boolean().default(true),
     /** Slices at or above this risk require a passing reviewer before commit. */
     requireReviewAtOrAbove: RiskSchema.optional(),
-    /** Globs forbidden for every slice (in addition to per-slice forbiddenPaths). */
+    /** Globs forbidden for every slice (in addition to per-slice forbiddenPaths).
+     * Conventional secret-bearing locations are blocked by default; the content
+     * secret-scanner is heuristic (pattern-based) and is a second line of defense,
+     * NOT a guarantee — path policy is the deterministic guard. Extend/override via
+     * config `riskPolicy.globalForbiddenPaths` (your globs are unioned with these). */
     globalForbiddenPaths: z.array(z.string()).default([
       '.env',
       '.env.*',
+      '**/.env',
+      '**/.env.*',
       '**/*.pem',
       '**/*.key',
+      '**/*.p12',
+      '**/*.pfx',
+      '**/id_rsa',
+      '**/id_dsa',
+      '**/id_ecdsa',
+      '**/id_ed25519',
+      '**/.git-credentials',
+      '**/.pgpass',
+      '**/.netrc',
+      'secrets/**',
+      '**/secrets/**',
+      'credentials/**',
+      '**/credentials/**',
       '.git/**',
       'infra/production/**',
     ]),

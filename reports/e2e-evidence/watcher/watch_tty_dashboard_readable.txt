@@ -1,0 +1,25 @@
+^D┌ agent-loop watch ───────── COMPLETED ┐
+│ Goal:   Build a small math utility … │
+│ Branch: agent-loop/build-a-small-…   │
+│ Runtime: 00:00:59   Progress: 4 / 4… │
+│ [████████] 100%                      │
+│ Progress is derived from runtime si… │
+└──────────────────────────────────────┘
+
+┌ CURRENT SLICE ┐ ┌ CHECKS ──┐ ┌ CHANGED FILES (1) ┐
+│ S-004 D… │      │ test   … │ │ 1 src/div… │       
+│ Phase: … │      └──────────┘ └────────────┘       
+│ Worker:… │                                        
+│ Attempt… │                                        
+└──────────┘                                        
+
+┌ RECENT EVENTS ──┐ ┌ GIT ─────────────┐
+│ 21:07:54 SLICE… │ │ clean working t… │
+│ 21:07:54 FINAL… │ │ uncommitted fil… │
+│ 21:07:54 CHECK… │ │ last commit: 42… │
+│ 21:07:54 CHECK… │ │ cost: $0.0000 /… │
+│ 21:07:54 FINAL… │ └──────────────────┘
+│ 21:07:54 RUN_C… │                     
+└─────────────────┘                     
+
+[p]ause [r]esume [l]ogs [g]diff [q]uit

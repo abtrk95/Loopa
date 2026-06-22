@@ -109,4 +109,5 @@ github:
 - A remote configured for the repo.
 - If `gh pr create` fails because the branch isn't on the remote, re-run with `--push`.
 
-`agent-loop doctor` reports whether `gh` is available so you can catch this before a run.
+Check `gh` yourself with `gh auth status` before opening a PR. (`agent-loop doctor` checks
+the Node/SQLite/git environment and configured AI providers; it does **not** probe `gh`.)

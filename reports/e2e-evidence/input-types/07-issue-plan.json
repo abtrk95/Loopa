@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "goal": "Add dark mode toggle",
+  "background": "Add dark mode toggle\n\nUsers want dark mode.\n\n- [ ] Add a toggle in settings\n- [ ] Persist preference\n- [x] Already-shipped thing\n\n> comment by alice:\nPlease also support system preference.",
+  "successCriteria": [
+    {
+      "id": "crit-test",
+      "type": "programmatic",
+      "description": "test passes",
+      "check": "npm run test",
+      "expect": "exit_zero"
+    }
+  ],
+  "constraints": [],
+  "assumptions": [
+    "Assumed default branch 'main'.",
+    "Derived verification commands from the project (test)."
+  ],
+  "nonGoals": [],
+  "repository": {
+    "root": "/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-issue",
+    "defaultBranch": "main",
+    "stack": [
+      "node"
+    ],
+    "packageManager": "npm"
+  },
+  "verification": [
+    {
+      "id": "test",
+      "category": "test",
+      "command": "npm run test",
+      "expect": "exit_zero"
+    }
+  ],
+  "riskPolicy": {
+    "maxDiffLines": 800,
+    "allowDependencyChanges": true,
+    "allowLockfileChanges": true,
+    "globalForbiddenPaths": [
+      ".env",
+      ".env.*",
+      "**/*.pem",
+      "**/*.key",
+      ".git/**",
+      "infra/production/**"
+    ]
+  },
+  "finalCompletionCriteria": [
+    "Every planned slice is verified-complete (deterministic checks passed + scoped commit exists).",
+    "Global verification commands all pass on the final tree."
+  ],
+  "source": {
+    "kind": "issue",
+    "ref": "#42"
+  },
+  "planId": "plan_c84df5f3087f",
+  "createdAt": "2026-06-21T21:08:11.361Z",
+  "slices": [
+    {
+      "id": "S-001",
+      "title": "Add dark mode toggle",
+      "description": "Add dark mode toggle\n\nUsers want dark mode.\n\n- [ ] Add a toggle in settings\n- [ ] Persist preference\n- [x] Already-shipped thing\n\n> comment by alice:\nPlease also support system preference.",
+      "acceptanceCriteria": [
+        "Add a toggle in settings",
+        "Persist preference",
+        "Already-shipped thing"
+      ],
+      "dependencies": [],
+      "allowedPaths": [
+        "**"
+      ],
+      "forbiddenPaths": [],
+      "requiredChecks": [
+        "test"
+      ],
+      "risk": "low",
+      "preferredRole": "worker",
+      "parallelSafe": false
+    }
+  ]
+}

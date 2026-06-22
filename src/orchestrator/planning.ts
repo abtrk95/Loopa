@@ -10,7 +10,8 @@ import { savePlan, saveObjective, saveRunMeta } from './session.js';
 import { normalizeInput, type RawInput } from '../intake/normalize.js';
 import { buildPlan } from '../planner/plan.js';
 import { assertValidPlan, type ValidationReport } from '../planner/validate.js';
-import type { Plan, Objective } from '../domain/schemas.js';
+import type { Plan, Objective, RiskPolicy } from '../domain/schemas.js';
+import type { Config } from '../config/config.js';
 
 export interface CreatePlanOptions {
   input: RawInput;
@@ -28,6 +29,13 @@ export interface CreatePlanResult {
 export function createPlan(session: Session, opts: CreatePlanOptions): CreatePlanResult {
   const { normalizeOptions } = buildNormalizeOptions(session, opts);
   const { objective, stories } = normalizeInput(opts.input, normalizeOptions);
+
+  // The deterministic verifier reads its policy from plan.riskPolicy (forbidden
+  // paths, lockfile/dependency policy, diff ceiling). Without this merge the user's
+  // .agent-loop/config.yml `riskPolicy` would validate but be silently ignored, so
+  // a configured hardening (e.g. globalForbiddenPaths: ["secrets/**"]) would never
+  // take effect. Fold config policy into the objective before the plan is built.
+  objective.riskPolicy = mergeRiskPolicy(session.config.riskPolicy, objective.riskPolicy);
 
   const createdAt = session.clock.iso();
   const plan = buildPlan(objective, stories, {
@@ -86,6 +94,26 @@ function buildNormalizeOptions(session: Session, opts: CreatePlanOptions): {
       ...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {}),
       auto: opts.auto ?? session.config.auto,
     },
+  };
+}
+
+/**
+ * Fold the project config's risk policy into the intake-derived one. Config scalars
+ * (the user's explicit intent) win; forbidden-path globs are UNIONED so the built-in
+ * safety defaults (.env, *.pem, .git, secrets/**, …) can never be lost even if a user
+ * supplies their own list.
+ */
+export function mergeRiskPolicy(cfg: Config['riskPolicy'], obj: RiskPolicy): RiskPolicy {
+  return {
+    maxDiffLines: cfg.maxDiffLines,
+    allowDependencyChanges: cfg.allowDependencyChanges,
+    allowLockfileChanges: cfg.allowLockfileChanges,
+    ...(cfg.requireReviewAtOrAbove
+      ? { requireReviewAtOrAbove: cfg.requireReviewAtOrAbove }
+      : obj.requireReviewAtOrAbove
+        ? { requireReviewAtOrAbove: obj.requireReviewAtOrAbove }
+        : {}),
+    globalForbiddenPaths: [...new Set([...cfg.globalForbiddenPaths, ...obj.globalForbiddenPaths])],
   };
 }
 

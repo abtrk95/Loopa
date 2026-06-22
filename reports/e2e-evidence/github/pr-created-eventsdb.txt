@@ -1,0 +1,5 @@
+tables: 
+query err: no such table: events
+types err: no such table: events
+(node:48640) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

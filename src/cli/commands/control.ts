@@ -81,11 +81,36 @@ export async function cmdLogs(args: ParsedArgs): Promise<number> {
   const root = resolveRoot(args);
   const paths = projectPaths(root);
   const logPath = paths.logsDir + '/agent-loop.log';
-  if (!existsSync(logPath)) {
-    process.stdout.write('No logs yet.\n');
+  const n = flagNum(args, 'lines') ?? 200;
+  const fileLog = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
+
+  // The human-readable file log only carries warn/error lines, so a clean run leaves
+  // it empty. The append-only event store is the real structured log — fall back to
+  // it (one line per event) so `logs` is useful for every run, not just failing ones.
+  if (fileLog.trim() === '') {
+    const meta = loadRunMeta(paths);
+    if (!meta || !existsSync(paths.eventsDb)) {
+      process.stdout.write('No logs yet.\n');
+      return 0;
+    }
+    const store = new SqliteEventStore(paths.eventsDb);
+    try {
+      const events = store.read(meta.runId);
+      if (events.length === 0) {
+        process.stdout.write('No logs yet.\n');
+        return 0;
+      }
+      for (const e of events.slice(-n)) {
+        const sid = e.sliceId ? ` ${e.sliceId}` : '';
+        const reason = typeof e.payload['reason'] === 'string' ? ` — ${e.payload['reason'] as string}` : '';
+        process.stdout.write(`${e.ts} ${e.source.padEnd(12)} ${e.type}${sid}${reason}\n`);
+      }
+    } finally {
+      store.close();
+    }
     return 0;
   }
-  const n = flagNum(args, 'lines') ?? 200;
+
   const printTail = (): void => {
     const lines = readFileSync(logPath, 'utf8').split('\n');
     process.stdout.write(lines.slice(-n).join('\n') + '\n');

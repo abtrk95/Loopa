@@ -1,4 +1,7 @@
 import '../util/sqlite-warning.js'; // must be first
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { parseArgs, flagBool, flagStr, flagNum, resolveRoot, type ParsedArgs } from './args.js';
 import { AgentLoopError, PlanValidationError, errorMessage } from '../domain/errors.js';
 import { cmdInit } from './commands/init.js';
@@ -10,7 +13,26 @@ import { cmdPr } from './commands/pr.js';
 import { cmdDemo } from './commands/demo.js';
 import { runWatch } from '../watch/dashboard.js';
 
-export const VERSION = '0.1.0';
+/**
+ * The single source of truth for the version is package.json. Read it at runtime
+ * (relative to this module) so `--version`/`--help` never drift from the package
+ * that actually shipped. Works from the built dist (dist/src/cli/index.js) and from
+ * source under tsx; falls back only if package.json cannot be located.
+ */
+function readVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../../../package.json', '../../package.json', '../../../../package.json']) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(here, rel), 'utf8')) as { name?: string; version?: string };
+      if (pkg.name === 'agent-loop' && typeof pkg.version === 'string') return pkg.version;
+    } catch {
+      // try the next candidate location
+    }
+  }
+  return '0.0.0-unknown';
+}
+
+export const VERSION = readVersion();
 
 const HELP = `agent-loop ${VERSION} — local-first autonomous coding loop
 

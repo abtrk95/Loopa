@@ -1,0 +1,14 @@
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/.gitignore
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts/checks
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts/context
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts/logs
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts/reviews
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/artifacts/ui-smoke
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/config.yml
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/control
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/events
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/reports
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/state
+/var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T//al-fakeflow-1071/.agent-loop/worktrees

@@ -53,6 +53,18 @@ shapes and blocks the dangerous ones:
 the verifier scans the diff *including untracked content* for credential shapes; any hit
 → `block`. The secret never reaches a commit.
 
+> **Honest limitation — the content scanner is heuristic.** It matches *known credential
+> shapes* (a deny-list; see Layer B's pattern list), so a custom, low-entropy, or
+> unusually-formatted secret can pass it. The **deterministic** guard against secret
+> exfiltration is **path policy**: `riskPolicy.globalForbiddenPaths` blocks `.env`,
+> `**/*.pem`/`**/*.key`, private-key filenames (`id_rsa`, …), `secrets/**`,
+> `credentials/**`, `.git-credentials`, `.netrc`, `.pgpass`, and more **by default**, and
+> any write matching them is a hard `block`. Extend it per-project via
+> `.agent-loop/config.yml` → `riskPolicy.globalForbiddenPaths` (your globs are **unioned**
+> with the built-in defaults, so you can only ever add protection). Treat the content
+> scanner as a second line of defense behind path policy and human PR review — not a
+> guarantee.
+
 **Layer B — redact secrets from everything persisted or displayed.** The `Redactor`
 (`src/security/redact.ts`) masks:
 

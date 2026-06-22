@@ -6,8 +6,8 @@
  * A GitRepo is bound to a working directory (the main worktree or a per-slice
  * worktree). All commands run shell-free through the ProcessManager.
  */
-import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { GitError } from '../domain/errors.js';
 import { ProcessManager, type RunResult } from '../process/manager.js';
 import type { Redactor } from '../security/redact.js';
@@ -37,7 +37,13 @@ export class GitRepo {
   }
 
   private async git(args: string[], opts: { allowFail?: boolean; input?: string; raw?: boolean } = {}): Promise<RunResult> {
-    const res = await this.pm.run(['git', ...args], {
+    // SECURITY: disable repository git hooks for EVERY agent-loop git invocation.
+    // A worker (or a poisoned clone) can plant an executable hook under .git/hooks/
+    // that git would otherwise execute during our automated commit/cherry-pick — a
+    // remote-code-execution vector that bypasses the deterministic verifier (git
+    // status never reports .git/, so scope/structural scans cannot see it). Pointing
+    // core.hooksPath at a non-directory makes git find no hooks and run none.
+    const res = await this.pm.run(['git', '-c', 'core.hooksPath=/dev/null', ...args], {
       cwd: this.dir,
       timeoutMs: 120_000,
       // `raw` bypasses redaction for internal diff reads fed to deterministic secret
@@ -321,6 +327,47 @@ export class GitRepo {
     if (res.ok) return 'ok';
     await this.git(['cherry-pick', '--abort'], { allowFail: true });
     return 'conflict';
+  }
+
+  /**
+   * Stable fingerprint of the repo's real git-hooks directory (resolved via
+   * `git rev-parse --git-path hooks`, so it is correct for both the main worktree
+   * and linked worktrees). Excludes git's stock `*.sample` files. Used by the
+   * executor to detect a worker that planted/modified a hook during its attempt —
+   * a `.git/` write that `git status` never surfaces. Hooks are also neutralised at
+   * execution time (core.hooksPath=/dev/null on every git call), so this is the
+   * detection half of a defense-in-depth pair.
+   */
+  async gitHooksFingerprint(): Promise<string> {
+    // Resolve the hooks dir from the git COMMON dir (correct for the main worktree
+    // and linked worktrees alike). We must NOT use `rev-parse --git-path hooks`
+    // here: every git call disables hooks via core.hooksPath=/dev/null, which would
+    // make --git-path report that override instead of the real hooks directory.
+    const res = await this.git(['rev-parse', '--git-common-dir'], { allowFail: true });
+    if (!res.ok) return '';
+    const common = res.stdout.trim();
+    if (!common) return '';
+    const commonDir = isAbsolute(common) ? common : join(this.dir, common);
+    const hooksDir = join(commonDir, 'hooks');
+    let entries: string[];
+    try {
+      entries = readdirSync(hooksDir);
+    } catch {
+      return ''; // no hooks dir yet → nothing to fingerprint
+    }
+    const parts: string[] = [];
+    for (const name of entries.sort()) {
+      if (name.endsWith('.sample')) continue;
+      try {
+        const st = statSync(join(hooksDir, name));
+        if (!st.isFile()) continue;
+        parts.push(`${name}:${st.size}:${(st.mode & 0o777).toString(8)}`);
+      } catch {
+        // unreadable — record presence so any change is still detected
+        parts.push(`${name}:?`);
+      }
+    }
+    return parts.join('|');
   }
 
   async lastCommit(): Promise<CommitInfo | undefined> {

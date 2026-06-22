@@ -8,6 +8,7 @@ import { openSession, loadPlan, loadRunMeta, type Session, type RunMeta } from '
 import { createPlan } from '../../orchestrator/planning.js';
 import { RunEngine } from '../../orchestrator/run.js';
 import { acquireRunLock, releaseRunLock } from '../../process/pidfile.js';
+import { ControlPlane } from '../../orchestrator/control.js';
 import { IntakeError, PlanValidationError, ControlError } from '../../domain/errors.js';
 import type { Plan } from '../../domain/schemas.js';
 import type { RunState } from '../../domain/states.js';
@@ -89,6 +90,13 @@ async function executeRun(session: Session, plan: Plan, meta: RunMeta, args: Par
   if (lock.takeover === 'stale') {
     process.stderr.write('recovered a stale run lock (a previous orchestrator did not exit cleanly)\n');
   }
+
+  // Reset any stale pause/stop intent left in the control plane by a PRIOR run
+  // process. The control file is for live control of a running engine; a leftover
+  // 'stopped'/'paused' from an earlier invocation must not silently cancel or hang
+  // this fresh run. (Live pause/stop from another terminal still works — it is
+  // written after this point.)
+  new ControlPlane(session.paths.controlDir).clear();
 
   // Graceful cancellation: SIGINT/SIGTERM abort the engine, which kills the active
   // child process groups and drives the run to a CANCELLED terminal state.

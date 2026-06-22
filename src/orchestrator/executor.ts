@@ -93,6 +93,9 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
     await workRepo.rollback();
     transition('PREPARING');
     const headBefore = await workRepo.headSha();
+    // Snapshot the git-hooks dir on the clean tree so we can detect a worker that
+    // plants/modifies a hook during this attempt (a .git/ write git status hides).
+    const hooksBefore = await workRepo.gitHooksFingerprint();
 
     const pack = buildContextPack({
       plan: ctx.plan,
@@ -130,6 +133,21 @@ export async function executeSlice(ctx: ExecContext, slice: Slice, workRepo: Git
           transition,
           'agent created its own commit(s); only working-tree edits are allowed',
           [`HEAD moved ${headBefore.slice(0, 8)} -> ${headAfter.slice(0, 8)} (self-commit bypasses scoped verification)`],
+          attempt,
+        );
+      }
+      // Structural escape that git status cannot see: a write under .git/ (e.g. a
+      // planted hook). Hooks are also neutralised at commit time, but a tamper here
+      // is a hard violation — undo and block.
+      const hooksAfter = await workRepo.gitHooksFingerprint();
+      if (hooksAfter !== hooksBefore) {
+        await workRepo.rollback();
+        return blockSlice(
+          ctx,
+          slice,
+          transition,
+          'agent wrote under .git/ (git hooks) — forbidden structural escape',
+          [`git hooks changed during execution: [${hooksBefore || 'none'}] -> [${hooksAfter || 'none'}]`],
           attempt,
         );
       }

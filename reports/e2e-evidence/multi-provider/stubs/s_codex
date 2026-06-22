@@ -1,0 +1,3 @@
+#!/bin/sh
+export STUB_NAME="s_codex"
+exec node "/Users/abtrk/Dev/loop/agent-loop/reports/e2e-evidence/multi-provider/stubs/stub.mjs" "$@"

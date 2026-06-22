@@ -5,7 +5,7 @@ import tsparser from '@typescript-eslint/parser';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'test/fixtures/**', 'coverage/**'],
+    ignores: ['dist/**', 'node_modules/**', 'test/fixtures/**', 'coverage/**', 'reports/**'],
   },
   {
     files: ['**/*.ts'],

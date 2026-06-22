@@ -180,7 +180,7 @@ Everything is under `.agent-loop/` in the target repo (see `src/util/paths.ts`):
     context/            # the exact context pack sent each attempt
     checks/             # captured check stdout/stderr per slice
     reviews/            # reviewer outputs
-    ui-smoke/           # optional UI smoke-command logs (experimental; not wired — no screenshots)
+    ui-smoke/           # browser/UI verification artifacts (PNG screenshots via CDP, HTML snapshots, browser.json)
   worktrees/            # transient per-slice worktrees (parallel mode)
   reports/              # run report + per-slice blocker reports
   control/control.json  # control-plane desired state

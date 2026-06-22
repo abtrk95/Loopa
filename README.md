@@ -69,11 +69,17 @@ The examples below assume you ran `npm link` (substitute one of the forms above 
 ```bash
 cd /path/to/your/git/repo
 agent-loop init
-git add -A && git commit -m "chore: add .agent-loop config"   # init writes config; commit it (runs require a clean tree)
+git add .gitignore && git commit -m "chore: ignore .agent-loop"   # init adds .agent-loop/ to .gitignore; commit so the tree is clean
 agent-loop plan --idea "Add a /health endpoint that returns 200 and a version string"
 agent-loop run --auto
 agent-loop status
 ```
+
+> **`.agent-loop/` is local run state, not committed.** `init` git-ignores the whole
+> `.agent-loop/` directory (config, plan, events, reports, control), so you don't commit
+> it — only the one-line `.gitignore` change `init` makes needs committing so the working
+> tree is clean (`run` refuses a dirty tree, counting only *your* files). Edit
+> `.agent-loop/config.yml` in place to configure providers/policy.
 
 > **Provider note.** The default `fake` provider is deterministic and **demo-only** — it
 > makes no edits for an arbitrary `--idea`, so a real plan run with it ends `BLOCKED`
@@ -158,6 +164,19 @@ operational/safety hardening below are implemented, tested, and honestly bounded
 - **`judge` role** — accepted in config but **reserved/not wired** (never invoked). So is
   `roles.browser` (a future provider-driven browser role); the *wired* browser feature is
   the top-level `browser` config section.
+- **Planning is deterministic; `roles.planner` is not executed.** Slices are derived
+  deterministically from your PRD/idea (one story → one slice; an idea → a single
+  conservative slice). A configured planner provider/model is accepted but currently has
+  no effect — there is no model-driven slicing yet.
+- **Secret scanning is heuristic.** The content secret-scanner matches *known credential
+  shapes* (a deny-list, not a guarantee) — a custom or low-entropy secret can slip past
+  it. The deterministic guard is **path policy**: `riskPolicy.globalForbiddenPaths` blocks
+  `.env`, private keys, `secrets/**`, `credentials/**`, etc. by default and is honored
+  from `.agent-loop/config.yml` (your globs are unioned with the built-in defaults). Treat
+  the content scanner as a second line of defense behind path policy + human review.
+- **Custom (non-preset) providers can't be model-pinned on the CLI.** Built-in presets
+  (`claude`/`codex`/`opencode`) map a model to the right flag; a fully custom
+  `providers.<id>` has no model-flag mapping, so its `model` is not passed as an argv flag.
 - **Platform support is macOS/Linux.** Windows is **untested and unsupported** (shell-free
   spawn cannot launch `.cmd`/`.bat` shims; `taskkill`-based tree reaping is implemented
   but unexercised in CI). CI gates on Linux + macOS; a Windows job runs non-blocking.

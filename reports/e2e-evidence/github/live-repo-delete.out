@@ -1,0 +1,2 @@
+HTTP 403: Must have admin rights to Repository. (https://api.github.com/repos/abtrk95/agent-loop-e2e-throwaway-1782076296)
+This API operation needs the "delete_repo" scope. To request it, run:  gh auth refresh -h github.com -s delete_repo

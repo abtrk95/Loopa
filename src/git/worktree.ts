@@ -49,6 +49,10 @@ export class WorktreePool {
     if (!handle) return;
     await this.main.removeWorktree(handle.path);
     rmSyncSafe(handle.path);
+    // Delete the per-slice worktree branch too: its verified commit has already been
+    // integrated (cherry-picked) onto the run branch by the orchestrator, so leaving
+    // the branch behind only pollutes the ref namespace (orphan aloop-wt/* branches).
+    await this.main.deleteBranch(handle.branch);
     this.handles.delete(sliceId);
   }
 
