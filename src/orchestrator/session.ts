@@ -94,6 +94,21 @@ export function openSession(opts: OpenSessionOptions): Session {
   };
 }
 
+/**
+ * Re-resolve config with extra CLI overrides and rebuild the provider registry on
+ * an open session. Used after an interview gathers orchestration choices (provider/
+ * model/concurrency) so a single `plan --interview` / `github run-issue --interview`
+ * command runs with the chosen orchestration. Goes through the same `loadConfig`
+ * precedence as `openSession`, so the result is identical to having passed the
+ * overrides up front.
+ */
+export function reconfigureSession(session: Session, cliOverrides: Record<string, unknown>): void {
+  const { config, sources } = loadConfig({ root: session.root, cliOverrides });
+  session.config = config;
+  session.configSources = sources;
+  session.registry = createRegistry(config, session.root, session.pm);
+}
+
 /** Add `.agent-loop/` to .git/info/exclude (local, uncommitted) if not present. */
 function ensureGitExcludesAgentDir(root: string): void {
   const gitDir = join(root, '.git');

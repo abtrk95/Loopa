@@ -29,7 +29,7 @@ import {
 import { detectProject, syncIssueStatus } from '../../github/project.js';
 import { watchOnce, watchLoop, watchPaths } from '../../github/watch.js';
 import { createPullRequest, updatePullRequest } from '../../github/pr.js';
-import { gatherInterview, interviewRequested, interviewModeFromArgs } from './interview.js';
+import { gatherInterview, interviewRequested, interviewModeFromArgs, printOrchestrationSummary } from './interview.js';
 import { exitCodeForState } from './run.js';
 import { ControlError, IntakeError } from '../../domain/errors.js';
 import type { GithubConfig } from '../../config/config.js';
@@ -40,8 +40,8 @@ import { cliConfigOverrides, flagBool, flagNum, flagStr, resolveRoot, type Parse
 const USAGE = `Usage: agent-loop github <command>
 
   triage    --repo o/n [--dry-run|--apply] [--issue N] [--comment] [--all] [--mode quick|standard|strict]
-  import    --repo o/n --issue N [--interview [mode]] [--auto]
-  run-issue --repo o/n --issue N [--auto] [--apply] [--pr] [--project] [--interview]
+  import    --repo o/n --issue N [--interview [mode]] [--accept-recommended] [--write-config] [--auto]
+  run-issue --repo o/n --issue N [--auto] [--apply] [--pr] [--project] [--interview] [--accept-recommended]
   watch     --repo o/n [--once] [--dry-run|--apply] [--interval N] [--max-iterations N] [--comment] [--project]
   project   sync --repo o/n --issue N [--status <column>] [--dry-run|--apply]
   pr        create|update --repo o/n [--issue N] [--push] [--no-draft] [--base B] [--remote R] [--dry-run]
@@ -153,8 +153,10 @@ async function planFromIssue(session: Session, args: ParsedArgs, repo: string, i
   const issue = await reader.viewIssue(repo, issueNum);
   const input: RawInput = { kind: 'issue', text: `${issue.title}\n\n${issue.body}`, ref: `#${issueNum}` };
   if (interviewRequested(args)) {
-    const { outcome, input: effective } = await gatherInterview(session, args, interviewModeFromArgs(args), input);
-    return createPlan(session, { input: effective, auto, interview: outcome });
+    const gathered = await gatherInterview(session, args, interviewModeFromArgs(args), input, { githubRequested: true });
+    const result = createPlan(session, { input: gathered.input, auto, interview: gathered.outcome });
+    printOrchestrationSummary(session, gathered, args);
+    return result;
   }
   return createPlan(session, { input, auto });
 }

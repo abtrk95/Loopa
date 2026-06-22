@@ -48,6 +48,9 @@ COMMANDS
          --spec <file> | --readme <file> | --issue <n> | --stdin
          [--interview [quick|standard|strict]]  Clarify before slicing
   interview [quick|standard|strict]  Interview-first intake (then plan)
+         [--accept-recommended]  Take every recommended answer (no prompts)
+         [--no-orchestration]    Skip the agent/model orchestration questions
+         [--write-config]        Persist orchestration choices to config.yml
   github <triage|import|run-issue|watch|project|pr> ...  GitHub orchestration
   run    [--auto] [--watch]   Execute the plan (--auto = unattended)
   retry                       Resume a blocked/interrupted run

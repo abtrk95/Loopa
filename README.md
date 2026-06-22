@@ -95,7 +95,7 @@ agent-loop status
 | --- | --- |
 | `init` | Scaffold `.agent-loop/` config + layout, add the local git-ignore entry. |
 | `plan --idea/--prd/--spec/--readme/--issue/--stdin [--interview [mode]]` | Normalize input → objective → validated plan of slices. `--interview` clarifies first. |
-| `interview [quick\|standard\|strict]` | Interview-first intake: clarify the objective, then plan. See [docs/interview-intake.md](docs/interview-intake.md). |
+| `interview [quick\|standard\|strict] [--accept-recommended] [--write-config]` | Interview-first intake with a **recommendation for every question** + agent/model orchestration (planner/workers/reviewer/fixer/fallback/concurrency). See [docs/interview-intake.md](docs/interview-intake.md), [docs/interview-recommendations.md](docs/interview-recommendations.md). |
 | `github triage\|import\|run-issue\|watch\|project\|pr …` | GitHub triage + Kanban orchestration (dry-run by default). See [docs/github-triage-kanban.md](docs/github-triage-kanban.md). |
 | `run [--auto] [--watch]` | Execute (or approve-then-execute) the plan. `--watch` runs the live dashboard. |
 | `retry` | Resume a blocked/interrupted run; re-attempt unfinished slices only. |
@@ -175,7 +175,13 @@ hermetically).
   untouched and the agent still cannot mark work done. In `--auto` it never hangs: it
   records conservative, confidence-tagged assumptions and **blocks** only when a
   safety-critical answer is missing (e.g. a high-risk objective with no way to verify it).
-  See [docs/interview-intake.md](docs/interview-intake.md).
+  Every question carries a grounded **recommendation** (recommended answer + why +
+  alternatives + risk + safe default + required/optional), and the interview also asks
+  **agent/model orchestration** questions (planner/workers/reviewer/fixer/fallback/
+  concurrency) — accept them all with `--accept-recommended`, persist with `--write-config`.
+  Strengthen-only: it never enables autonomy on high-risk work and the verifier stays
+  authoritative. See [docs/interview-intake.md](docs/interview-intake.md) and
+  [docs/interview-recommendations.md](docs/interview-recommendations.md).
 - **GitHub triage + Kanban** (`github triage|import|run-issue|watch|project|pr`):
   classifies issues (ready / needs-info / too-risky / unsupported), comments clarification
   questions on unclear ones, applies configurable `agent-loop:*` labels, optionally moves
@@ -238,6 +244,7 @@ evidence-based assessment is in
 - [docs/recovery.md](docs/recovery.md) — crash recovery, resume, retry, blockers.
 - [docs/terminal-dashboard.md](docs/terminal-dashboard.md) — the watcher, layout, keys, modes.
 - [docs/interview-intake.md](docs/interview-intake.md) — the interview wizard, modes, auto-assumptions, safety.
+- [docs/interview-recommendations.md](docs/interview-recommendations.md) — per-question recommendations + agent/model orchestration questions, and the strengthen-only guarantees.
 - [docs/github-integration.md](docs/github-integration.md) — PR creation, what we never do.
 - [docs/github-triage-kanban.md](docs/github-triage-kanban.md) — issue triage, labels, Kanban sync, watch mode.
 - [docs/operations.md](docs/operations.md) — day-to-day operating playbook.

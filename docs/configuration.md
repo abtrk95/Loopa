@@ -208,6 +208,13 @@ safety (it never weakens the verifier). It honors top-level `auto` (non-interact
 conservative recorded assumptions) and reads `verification.commands` / `riskPolicy` as
 context. See [interview-intake.md](interview-intake.md).
 
+The interview can also **set the `roles` / `routing` / `execution.concurrency` /
+`browser` / `github` keys above** from its agent/model orchestration questions: every
+question carries a recommendation, `--accept-recommended` takes them all, and
+`--write-config` merges the chosen override into this file (otherwise it applies to the
+current run only). It is strengthen-only — e.g. it never sets `auto: true` on a high-risk
+objective. See [interview-recommendations.md](interview-recommendations.md).
+
 ## Environment overrides
 
 `AGENT_LOOP_*` variables override the matching config keys (resolved in `load.ts`'s

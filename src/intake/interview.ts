@@ -25,6 +25,7 @@ import type { CheckSpec, Objective, Risk } from '../domain/schemas.js';
 import { CheckSpecSchema } from '../domain/schemas.js';
 import type { RawStory, NormalizeResult } from './normalize.js';
 import { IntakeError } from '../domain/errors.js';
+import type { Recommendation } from './recommend.js';
 
 export const INTERVIEW_MODES = ['quick', 'standard', 'strict'] as const;
 export type InterviewMode = (typeof INTERVIEW_MODES)[number];
@@ -58,6 +59,26 @@ export interface InterviewAnswers {
   autonomous?: boolean;
   humanCheckpoints?: string[];
   stopConditions?: string[];
+
+  // --- orchestration (folded into CONFIG, not the Objective; strengthen-only) ---
+  /** Planner provider (or "provider:model"). */
+  plannerProvider?: string;
+  /** Worker provider(s) (each "provider" or "provider:model"). */
+  workerProviders?: string[];
+  /** Max slices running concurrently (parallel worktrees). */
+  concurrency?: number;
+  /** Reviewer provider (or "none" for verifier-only). */
+  reviewerProvider?: string;
+  /** Require consensus from multiple distinct reviewers. */
+  reviewerConsensus?: boolean;
+  /** Fixer strategy: "same-as-worker" or a provider id. */
+  fixerStrategy?: string;
+  /** Fallback provider when the primary fails ("none" to disable). */
+  fallbackProvider?: string;
+  /** Switch to another provider on retry instead of reusing the fixer. */
+  switchOnRetry?: boolean;
+  /** Make browser verification blocking (true) rather than advisory (false). */
+  browserRequired?: boolean;
 }
 
 /** The validated output of an interview: answers + recorded assumptions. */
@@ -71,9 +92,16 @@ export interface InterviewOutcome {
 export interface Prompter {
   /** Ask a free-text question; returns the raw answer (may be empty). */
   ask(question: string, opts?: { default?: string }): Promise<string>;
+  /**
+   * Optional richer prompt: present a full {@link Recommendation} (recommended
+   * answer, why, alternatives, risk, default, required) and return the raw answer.
+   * Implementations that omit this fall back to {@link Prompter.ask}. The engine
+   * stays I/O-free; only the CLI prompter renders the block.
+   */
+  askRecommended?(rec: Recommendation): Promise<string>;
 }
 
-type QuestionType = 'text' | 'list' | 'yesno' | 'risk';
+type QuestionType = 'text' | 'list' | 'yesno' | 'risk' | 'number' | 'choice';
 
 interface QuestionSpec {
   key: keyof InterviewAnswers;
@@ -81,8 +109,20 @@ interface QuestionSpec {
   type: QuestionType;
   /** Smallest mode at which this question is asked (quick ⊂ standard ⊂ strict). */
   from: InterviewMode;
+  /** Which part of the run this question shapes (defaults to 'objective'). */
+  section?: 'objective' | 'orchestration';
   /** Safety-critical: in --auto, blocks if no safe default exists for the context. */
   safetyCritical?: boolean;
+}
+
+/** Extra options for {@link conductInterview} (all optional, backward-compatible). */
+export interface ConductOptions {
+  /** Per-question recommendations to display/accept (keyed by question key). */
+  recommendations?: Map<keyof InterviewAnswers, Recommendation>;
+  /** Take the recommended answer for every question without prompting. */
+  acceptRecommended?: boolean;
+  /** Also ask the agent/model orchestration questions. */
+  includeOrchestration?: boolean;
 }
 
 /**
@@ -109,6 +149,25 @@ export const QUESTION_CATALOG: readonly QuestionSpec[] = [
   { key: 'mergePolicy', prompt: 'Deployment / merge policy', type: 'text', from: 'strict' },
   { key: 'humanCheckpoints', prompt: 'Human approval checkpoints required (comma-separated)', type: 'list', from: 'strict' },
   { key: 'stopConditions', prompt: 'Stop / blocker conditions (comma-separated)', type: 'list', from: 'strict' },
+];
+
+/**
+ * Agent/model ORCHESTRATION questions. These fold into CONFIG (not the Objective)
+ * via {@link applyOrchestration}, and only ever choose providers/models/concurrency
+ * (which the deterministic verifier always dominates) or RAISE a safety floor. They
+ * are asked only when the caller opts in (`includeOrchestration`), so the default
+ * objective interview is unchanged. `quick` never asks them.
+ */
+export const ORCHESTRATION_CATALOG: readonly QuestionSpec[] = [
+  { key: 'plannerProvider', prompt: 'Planner provider/model — who decomposes the work into slices?', type: 'choice', from: 'standard', section: 'orchestration' },
+  { key: 'workerProviders', prompt: 'Worker provider(s)/model(s) that execute slices (comma-separated)?', type: 'list', from: 'standard', section: 'orchestration' },
+  { key: 'concurrency', prompt: 'How many slices may run in parallel (concurrency)?', type: 'number', from: 'standard', section: 'orchestration' },
+  { key: 'reviewerProvider', prompt: 'Reviewer provider/model — "none" for the deterministic verifier only?', type: 'choice', from: 'standard', section: 'orchestration' },
+  { key: 'browserRequired', prompt: 'Make browser/UI verification required (blocking) rather than advisory? (y/N)', type: 'yesno', from: 'standard', section: 'orchestration' },
+  { key: 'reviewerConsensus', prompt: 'Require consensus from multiple distinct reviewers? (y/N)', type: 'yesno', from: 'strict', section: 'orchestration' },
+  { key: 'fixerStrategy', prompt: 'Fixer strategy — "same-as-worker" or a dedicated provider?', type: 'choice', from: 'strict', section: 'orchestration' },
+  { key: 'fallbackProvider', prompt: 'Fallback provider when the primary fails — "none" to disable?', type: 'choice', from: 'strict', section: 'orchestration' },
+  { key: 'switchOnRetry', prompt: 'Switch to another provider on retry (instead of reusing the fixer)? (y/N)', type: 'yesno', from: 'strict', section: 'orchestration' },
 ];
 
 const HIGH_RISK_RE = /\b(auth|authentication|password|secret|payment|billing|crypto|security|migration|delete|drop|production|infra|deploy)\b/i;
@@ -177,6 +236,11 @@ export function selectQuestions(mode: InterviewMode, ctx: InterviewContext): Que
   });
 }
 
+/** Select the agent/model orchestration questions to ask for a mode. */
+export function selectOrchestrationQuestions(mode: InterviewMode, _ctx: InterviewContext): QuestionSpec[] {
+  return ORCHESTRATION_CATALOG.filter((q) => modeIncludes(mode, q.from));
+}
+
 /**
  * Run the interview. Interactive when a prompter is supplied and ctx.interactive
  * is true; otherwise derives conservative, recorded assumptions and never blocks
@@ -187,23 +251,50 @@ export async function conductInterview(
   ctx: InterviewContext,
   prompter?: Prompter,
   preset: InterviewAnswers = {},
+  opts: ConductOptions = {},
 ): Promise<InterviewOutcome> {
   const answers: InterviewAnswers = { ...preset };
   const assumptions: InterviewAssumption[] = [];
   const interactive = ctx.interactive && !ctx.auto && prompter !== undefined;
-  const questions = selectQuestions(mode, ctx);
+  const recs = opts.recommendations;
+  // Orchestration questions only make sense when we can actually choose (an
+  // interactive user, or an explicit accept-recommended). In pure --auto they are
+  // skipped and config keeps its defaults.
+  const includeOrch = Boolean(opts.includeOrchestration) && (interactive || Boolean(opts.acceptRecommended));
+  const questions = [
+    ...selectQuestions(mode, ctx),
+    ...(includeOrch ? selectOrchestrationQuestions(mode, ctx) : []),
+  ];
 
   for (const q of questions) {
     // A preset answer (from --answers JSON) wins and is never re-asked.
     if (answers[q.key] !== undefined) continue;
+    const rec = recs?.get(q.key);
 
     if (interactive) {
-      const raw = (await prompter!.ask(q.prompt)).trim();
+      const raw = (
+        rec && prompter!.askRecommended
+          ? await prompter!.askRecommended(rec)
+          : await prompter!.ask(q.prompt, rec && rec.recommended ? { default: rec.recommended } : undefined)
+      ).trim();
       if (raw) {
         assignAnswer(answers, q, raw, assumptions);
         continue;
       }
-      // Empty interactive answer falls through to the conservative default below.
+      // Empty interactive answer: accept the recommendation if there is one,
+      // otherwise fall through to the conservative default.
+      if (acceptableRec(rec)) {
+        acceptRecommendation(answers, q, rec!, assumptions);
+        continue;
+      }
+      deriveDefault(q, ctx, answers, assumptions);
+      continue;
+    }
+
+    // Non-interactive: accept recommendations on the fast path, else default.
+    if (opts.acceptRecommended && acceptableRec(rec)) {
+      acceptRecommendation(answers, q, rec!, assumptions);
+      continue;
     }
 
     deriveDefault(q, ctx, answers, assumptions);
@@ -211,6 +302,17 @@ export async function conductInterview(
 
   enforceSafety(mode, ctx, answers);
   return { mode, answers, assumptions };
+}
+
+/** A recommendation is acceptable when it carries a concrete recommended value. */
+function acceptableRec(rec: Recommendation | undefined): rec is Recommendation {
+  return rec !== undefined && rec.recommended.trim() !== '';
+}
+
+/** Assign the recommended value and record it as a (high-confidence) decision. */
+function acceptRecommendation(answers: InterviewAnswers, q: QuestionSpec, rec: Recommendation, assumptions: InterviewAssumption[]): void {
+  assignAnswer(answers, q, rec.recommended, assumptions);
+  assumptions.push({ text: `Accepted recommended ${String(q.key)}: ${rec.recommendedLabel ?? rec.recommended}.`, confidence: 'high' });
 }
 
 function assignAnswer(answers: InterviewAnswers, q: QuestionSpec, raw: string, assumptions: InterviewAssumption[]): void {
@@ -227,6 +329,13 @@ function assignAnswer(answers: InterviewAnswers, q: QuestionSpec, raw: string, a
       else assumptions.push({ text: `Ignored unrecognized risk '${raw}'; using planner heuristic.`, confidence: 'low' });
       break;
     }
+    case 'number': {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 1) (answers[q.key] as number) = Math.floor(n);
+      else assumptions.push({ text: `Ignored non-numeric '${raw}' for ${String(q.key)}; using config default.`, confidence: 'low' });
+      break;
+    }
+    case 'choice':
     case 'text':
     default:
       (answers[q.key] as string) = raw;
@@ -475,4 +584,83 @@ function criterionId(index: number): string {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
+}
+
+// ---------------------------------------------------------------------------
+// Applying orchestration answers to CONFIG (provider/model/concurrency choices)
+// ---------------------------------------------------------------------------
+
+export interface OrchestrationApply {
+  /** A deep-mergeable config override (same shape as project config / CLI overrides). */
+  override: Record<string, unknown>;
+  /** Human-readable notes about what was (and was NOT) applied, and follow-ups. */
+  notes: string[];
+}
+
+/**
+ * Translate accepted orchestration answers into a config override. This ONLY ever
+ * selects providers/models/concurrency (which the deterministic verifier always
+ * dominates) or RAISES a safety floor (required browser verification). It is
+ * strengthen-only: it will NOT enable autonomy on a high-risk objective, and it
+ * never touches `verification`/`riskPolicy` to relax a guard.
+ */
+export function applyOrchestration(a: InterviewAnswers, opts: { highRisk: boolean }): OrchestrationApply {
+  const roles: Record<string, unknown> = {};
+  const routing: Record<string, unknown> = {};
+  const execution: Record<string, unknown> = {};
+  const browser: Record<string, unknown> = {};
+  const github: Record<string, unknown> = {};
+  const override: Record<string, unknown> = {};
+  const notes: string[] = [];
+
+  if (a.plannerProvider && a.plannerProvider !== 'fake' && a.plannerProvider !== 'none') {
+    roles['planner'] = parseProviderRefLocal(a.plannerProvider);
+  }
+  if (a.workerProviders?.length) {
+    const ws = a.workerProviders.filter((w) => w && w !== 'none');
+    if (ws.length) roles['workers'] = ws.map((w) => parseProviderRefLocal(w));
+  }
+  if (typeof a.concurrency === 'number' && a.concurrency >= 1) {
+    execution['concurrency'] = Math.floor(a.concurrency);
+  }
+  if (a.reviewerProvider && a.reviewerProvider !== 'none') {
+    roles['reviewer'] = parseProviderRefLocal(a.reviewerProvider);
+  }
+  if (a.reviewerConsensus) {
+    routing['reviewerConsensus'] = 2;
+    notes.push('Reviewer consensus enabled (2 votes). For distinct-provider voting, set roles.reviewers in config.');
+  }
+  if (a.fixerStrategy && a.fixerStrategy !== 'same-as-worker') {
+    roles['fixer'] = parseProviderRefLocal(a.fixerStrategy);
+  }
+  if (a.fallbackProvider && a.fallbackProvider !== 'none') {
+    routing['fallbackOrder'] = [a.fallbackProvider.split(':')[0]];
+  }
+  if (a.switchOnRetry) routing['switchProviderOnRetry'] = true;
+  if (a.browserVerification) {
+    browser['enabled'] = true;
+    if (a.browserRequired) browser['required'] = true;
+    notes.push('Browser verification enabled — set browser.startCommand / baseUrl / routes in config before running.');
+  }
+  if (a.githubIntegration) github['enabled'] = true;
+
+  // STRENGTHEN-ONLY: never enable autonomy on high-risk work.
+  if (a.autonomous === true) {
+    if (opts.highRisk) notes.push('Autonomy NOT enabled: the objective looks high-risk — keeping a human in the loop.');
+    else override['auto'] = true;
+  }
+
+  if (Object.keys(roles).length) override['roles'] = roles;
+  if (Object.keys(routing).length) override['routing'] = routing;
+  if (Object.keys(execution).length) override['execution'] = execution;
+  if (Object.keys(browser).length) override['browser'] = browser;
+  if (Object.keys(github).length) override['github'] = github;
+  return { override, notes };
+}
+
+/** "provider" or "provider:model" → a partial provider ref (no CLI dependency). */
+function parseProviderRefLocal(value: string): { provider: string; model?: string } {
+  const idx = value.indexOf(':');
+  if (idx < 0) return { provider: value.trim() };
+  return { provider: value.slice(0, idx).trim(), model: value.slice(idx + 1).trim() };
 }

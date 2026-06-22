@@ -8,11 +8,22 @@ import { tmpdir } from 'node:os';
 import {
   conductInterview,
   applyInterview,
+  applyOrchestration,
   clarificationPrompts,
   selectQuestions,
+  selectOrchestrationQuestions,
+  type InterviewAnswers,
   type InterviewContext,
   type Prompter,
 } from '../../src/intake/interview.js';
+import {
+  buildRecommendations,
+  computeSignals,
+  type ProviderInfo,
+  type RecommendInputs,
+  type Recommendation,
+} from '../../src/intake/recommend.js';
+import { defaultConfig } from '../../src/config/config.js';
 import { normalizeInput } from '../../src/intake/normalize.js';
 import { buildPlan } from '../../src/planner/plan.js';
 import { assertValidPlan } from '../../src/planner/validate.js';
@@ -214,5 +225,160 @@ describe('interview — clarification prompts (reused by GitHub triage)', () => 
     const qs = clarificationPrompts('standard', { goal: true, acceptanceCriteria: true });
     expect(qs.length).toBeGreaterThan(0);
     expect(qs.join(' ')).not.toMatch(/Acceptance criteria/); // already present → not asked
+  });
+});
+
+// --- recommendations + agent/model orchestration -----------------------------
+
+const PROVIDERS: ProviderInfo[] = [
+  { id: 'fake', installed: true, roles: ['planner', 'worker', 'reviewer', 'fixer'] },
+  { id: 'claude', installed: true, roles: ['planner', 'worker', 'reviewer', 'fixer', 'judge'] },
+  { id: 'codex', installed: true, roles: ['planner', 'worker', 'reviewer', 'fixer'] },
+];
+
+function recInputsFor(goalText: string): RecommendInputs {
+  const signals = computeSignals({
+    goalText,
+    stack: ['node', 'typescript', 'vitest'],
+    packageManager: 'npm',
+    packageScripts: ['test'],
+    detectedChecks: ['test'],
+    detectedCommands: ['npm test'],
+    gitClean: true,
+    gitBranch: 'main',
+  });
+  return { mode: 'standard', goalText, signals, providers: PROVIDERS, config: defaultConfig(), auto: false };
+}
+
+function recsForMode(mode: 'quick' | 'standard' | 'strict', ctx: InterviewContext, goalText: string): Map<keyof InterviewAnswers, Recommendation> {
+  const questions = [...selectQuestions(mode, ctx), ...selectOrchestrationQuestions(mode, ctx)];
+  return buildRecommendations(questions.map((q) => ({ key: q.key, prompt: q.prompt })), recInputsFor(goalText));
+}
+
+describe('interview — orchestration question selection', () => {
+  it('quick asks NO orchestration questions; standard asks several; strict asks more', () => {
+    const ctx: InterviewContext = { detectedChecks: [], auto: false, interactive: true };
+    expect(selectOrchestrationQuestions('quick', ctx)).toHaveLength(0);
+    const std = selectOrchestrationQuestions('standard', ctx).map((q) => q.key);
+    expect(std).toEqual(expect.arrayContaining(['plannerProvider', 'workerProviders', 'concurrency', 'reviewerProvider']));
+    expect(selectOrchestrationQuestions('strict', ctx).length).toBeGreaterThan(std.length);
+  });
+
+  it('does not change the objective question selection (back-compat)', () => {
+    const ctx: InterviewContext = { detectedChecks: [], auto: false, interactive: true };
+    expect(selectQuestions('quick', ctx).map((q) => q.key)).toEqual(['goal', 'acceptanceCriteria', 'verificationCommands']);
+  });
+});
+
+describe('interview — accept-recommended fast path', () => {
+  it('takes the recommended orchestration answers and records them as decisions', async () => {
+    const base = baseFor('Add a CSV export utility');
+    const ctx: InterviewContext = { base, detectedChecks: ['test'], auto: false, interactive: false };
+    const recs = recsForMode('standard', ctx, 'Add a CSV export utility');
+    const outcome = await conductInterview('standard', ctx, undefined, {}, {
+      recommendations: recs,
+      acceptRecommended: true,
+      includeOrchestration: true,
+    });
+    // Orchestration answers taken from recommendations (claude installed → preferred).
+    expect(outcome.answers.plannerProvider).toBe('claude');
+    expect(outcome.answers.workerProviders).toEqual(['claude']);
+    expect(outcome.answers.concurrency).toBe(1);
+    // Low-risk goal → reviewer "none", attended.
+    expect(outcome.answers.reviewerProvider).toBe('none');
+    expect(outcome.answers.autonomous).toBe(false);
+    // The decisions are explicitly recorded.
+    expect(outcome.assumptions.some((a) => /Accepted recommended/.test(a.text))).toBe(true);
+  });
+
+  it('does NOT ask orchestration questions in pure --auto (config keeps defaults)', async () => {
+    const base = baseFor('Add a CSV export utility');
+    const ctx: InterviewContext = { base, detectedChecks: ['test'], auto: true, interactive: false };
+    const recs = recsForMode('standard', ctx, 'Add a CSV export utility');
+    const outcome = await conductInterview('standard', ctx, undefined, {}, { recommendations: recs, includeOrchestration: true });
+    expect(outcome.answers.plannerProvider).toBeUndefined();
+    expect(outcome.answers.concurrency).toBeUndefined();
+  });
+});
+
+describe('interview — interactive recommendations (askRecommended)', () => {
+  class RecPrompter implements Prompter {
+    seen: string[] = [];
+    constructor(private readonly typed: Partial<Record<string, string>>) {}
+    async ask(): Promise<string> {
+      return '';
+    }
+    async askRecommended(rec: Recommendation): Promise<string> {
+      this.seen.push(String(rec.key));
+      return this.typed[String(rec.key)] ?? ''; // empty → accept recommended
+    }
+  }
+
+  it('renders recommendations, accepts on empty, and lets a typed answer override', async () => {
+    const base = baseFor('Add a CSV export utility');
+    const ctx: InterviewContext = { base, detectedChecks: ['test'], auto: false, interactive: true };
+    const recs = recsForMode('standard', ctx, 'Add a CSV export utility');
+    const prompter = new RecPrompter({ concurrency: '2', plannerProvider: 'codex' });
+    const outcome = await conductInterview('standard', ctx, prompter, {}, {
+      recommendations: recs,
+      includeOrchestration: true,
+    });
+    expect(prompter.seen).toEqual(expect.arrayContaining(['plannerProvider', 'concurrency']));
+    // Typed answers override the recommendation.
+    expect(outcome.answers.concurrency).toBe(2);
+    expect(outcome.answers.plannerProvider).toBe('codex');
+    // Empty answer accepted the recommended worker.
+    expect(outcome.answers.workerProviders).toEqual(['claude']);
+  });
+});
+
+describe('interview — applyOrchestration (strengthen-only config override)', () => {
+  it('builds roles/routing/execution/browser/github overrides from answers', () => {
+    const answers: InterviewAnswers = {
+      plannerProvider: 'claude',
+      workerProviders: ['claude', 'codex'],
+      concurrency: 2,
+      reviewerProvider: 'codex',
+      fallbackProvider: 'codex',
+      switchOnRetry: true,
+      browserVerification: true,
+      browserRequired: true,
+      githubIntegration: true,
+    };
+    const { override } = applyOrchestration(answers, { highRisk: false });
+    expect((override.roles as Record<string, unknown>).planner).toEqual({ provider: 'claude' });
+    expect((override.roles as Record<string, unknown>).workers).toEqual([{ provider: 'claude' }, { provider: 'codex' }]);
+    expect((override.roles as Record<string, unknown>).reviewer).toEqual({ provider: 'codex' });
+    expect((override.execution as Record<string, unknown>).concurrency).toBe(2);
+    expect((override.routing as Record<string, unknown>).fallbackOrder).toEqual(['codex']);
+    expect((override.routing as Record<string, unknown>).switchProviderOnRetry).toBe(true);
+    expect(override.browser).toEqual({ enabled: true, required: true });
+    expect((override.github as Record<string, unknown>).enabled).toBe(true);
+  });
+
+  it('parses provider:model refs', () => {
+    const { override } = applyOrchestration({ plannerProvider: 'claude:opus-4', workerProviders: ['codex:gpt'] }, { highRisk: false });
+    expect((override.roles as Record<string, unknown>).planner).toEqual({ provider: 'claude', model: 'opus-4' });
+    expect((override.roles as Record<string, unknown>).workers).toEqual([{ provider: 'codex', model: 'gpt' }]);
+  });
+
+  it('NEVER enables autonomy on a high-risk objective (strengthen-only)', () => {
+    const high = applyOrchestration({ autonomous: true }, { highRisk: true });
+    expect(high.override.auto).toBeUndefined();
+    expect(high.notes.some((n) => /Autonomy NOT enabled/i.test(n))).toBe(true);
+
+    const low = applyOrchestration({ autonomous: true }, { highRisk: false });
+    expect(low.override.auto).toBe(true);
+  });
+
+  it('ignores browserRequired unless browser verification is on', () => {
+    expect(applyOrchestration({ browserRequired: true }, { highRisk: false }).override.browser).toBeUndefined();
+    expect(applyOrchestration({ browserVerification: true, browserRequired: true }, { highRisk: false }).override.browser).toEqual({ enabled: true, required: true });
+  });
+
+  it('never selects the fake/none sentinels as real providers', () => {
+    const { override } = applyOrchestration({ plannerProvider: 'fake', workerProviders: ['none'], reviewerProvider: 'none', fallbackProvider: 'none' }, { highRisk: false });
+    expect(override.roles).toBeUndefined();
+    expect(override.routing).toBeUndefined();
   });
 });

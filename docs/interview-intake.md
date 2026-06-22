@@ -8,7 +8,12 @@ change how work is executed or verified.
 > **strengthen** safety. It never weakens the verifier, never marks work done, and
 > completion stays `verified-completed / total` slices.
 
-Source: `src/intake/interview.ts`, `src/cli/commands/interview.ts`, `src/cli/prompter.ts`.
+For **every** question the interview now also gives a grounded **recommendation**
+(recommended answer + why + alternatives + risk + safe default + required/optional) and
+asks **agent/model orchestration** questions (planner/workers/reviewer/fixer/fallback/
+concurrency). See **[interview-recommendations.md](./interview-recommendations.md)**.
+
+Source: `src/intake/interview.ts`, `src/intake/recommend.ts`, `src/cli/commands/interview.ts`, `src/cli/prompter.ts`.
 
 ## Commands
 
@@ -19,6 +24,9 @@ agent-loop plan --idea "..." --interview          # interview, defaulting to sta
 agent-loop plan --idea "..." --interview strict   # deeper clarification before slicing
 agent-loop plan --prd ./prd.md --interview        # enrich a PRD with an interview
 agent-loop plan --issue 123 --interview           # (via github import) clarify an issue
+agent-loop plan --idea "..." --interview --accept-recommended   # take all recommendations, no prompts
+agent-loop interview standard --no-orchestration  # objective questions only (skip agent/model qs)
+agent-loop interview standard --accept-recommended --write-config  # persist chosen orchestration
 ```
 
 Anything you can plan from (`--idea`, `--prd`, `--spec`, `--readme`, `--issue`,
@@ -41,9 +49,14 @@ The interview clarifies (depending on mode):
 - Whether the task can **run autonomously**
 - **Human approval checkpoints**
 - **Stop / blocker conditions**
+- **Agent/model orchestration** (`standard`+): planner, worker(s), concurrency, reviewer,
+  required-vs-advisory browser verification; and at `strict`: reviewer consensus, fixer
+  strategy, fallback provider, switch-on-retry. See
+  [interview-recommendations.md](./interview-recommendations.md).
 
 Questions already answered by your input are skipped (e.g. a PRD that already lists
-acceptance criteria won't be asked for them again).
+acceptance criteria won't be asked for them again). Every asked question comes with a
+recommendation; press Enter to accept it, or `--accept-recommended` to accept them all.
 
 ## Modes
 
@@ -57,8 +70,8 @@ acceptance criteria won't be asked for them again).
 
 ## Interactive vs. non-interactive
 
-- **Interactive** (a TTY, not `--auto`): you're prompted for each unanswered question;
-  pressing Enter accepts the conservative default.
+- **Interactive** (a TTY, not `--auto`): each unanswered question is shown with its full
+  recommendation; pressing Enter accepts the **recommended** value, typing overrides it.
 - **Non-interactive** (`--auto`, or no TTY, or piped): the interview **never hangs**. For
   each missing answer it derives a conservative default and **records it as an
   assumption**. Low-confidence assumptions are tagged `(low confidence — verify)`.
@@ -132,8 +145,13 @@ forbidden area, remove a check, or downgrade risk.**
 ## What it does NOT do
 
 - It does **not** execute work, mark slices done, or change the verifier.
-- It does **not** enable browser verification or GitHub writes on its own — it only
-  *records the intent*; you still configure and run those explicitly.
+- It can **configure** orchestration (planner/workers/reviewer/concurrency, and the
+  `browser.enabled` / `github.enabled` switches) from accepted answers — applied to the
+  current run and, with `--write-config`, persisted — but enabling browser verification
+  still needs a `startCommand`/`baseUrl`, and GitHub writes still require explicit
+  `--apply`/`--pr`. Nothing executes implicitly.
+- It is **strengthen-only**: it never enables autonomy on a high-risk objective, never
+  lowers risk, never removes a check, and never widens scope into a forbidden area.
 - It does **not** set auto-merge/deploy (there is no such path anywhere in agent-loop).
 
 ## Tests

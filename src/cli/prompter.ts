@@ -4,6 +4,7 @@
  */
 import { createInterface } from 'node:readline';
 import type { Prompter } from '../intake/interview.js';
+import { formatRecommendation, type Recommendation } from '../intake/recommend.js';
 
 export class ReadlinePrompter implements Prompter {
   async ask(question: string, opts?: { default?: string }): Promise<string> {
@@ -16,6 +17,16 @@ export class ReadlinePrompter implements Prompter {
     } finally {
       rl.close();
     }
+  }
+
+  /**
+   * Render the full recommendation block, then accept an answer. Pressing Enter
+   * takes the recommended value (shown as the default); anything typed overrides it.
+   */
+  async askRecommended(rec: Recommendation): Promise<string> {
+    process.stdout.write('\n' + formatRecommendation(rec) + '\n');
+    const reco = rec.recommended.trim();
+    return this.ask('Your answer (Enter = accept recommended)', reco ? { default: reco } : undefined);
   }
 }
 

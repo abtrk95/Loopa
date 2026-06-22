@@ -185,6 +185,18 @@ By default the executor chooses the worker once per slice (first attempt) and us
 fixer for subsequent attempts; `switchProviderOnRetry` and `fallbackOrder` change this as
 described above.
 
+### Choosing roles via the interview
+
+You don't have to hand-write this config. The **interview** recommends and configures
+planner / workers / reviewer / fixer / fallback / switch-on-retry / concurrency for you,
+grounded in your idea, the detected stack, the installed providers (`agent-loop
+providers`), and the task's risk — then applies the choices to the run (and persists them
+with `--write-config`). The recommendations are strengthen-only and never alter the fact
+that the **deterministic verifier is the sole completion authority**: no worker, reviewer,
+reviewer-consensus, or fallback can pass a slice the verifier failed (out-of-scope edits,
+secrets, failed checks, forbidden-path writes). See
+[interview-recommendations.md](interview-recommendations.md).
+
 ## Registry
 
 `createRegistry(config, root, pm)` builds the set of live adapters from config: it always
