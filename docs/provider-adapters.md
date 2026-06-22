@@ -123,6 +123,32 @@ providers:
 
 See [security-model.md](security-model.md) for the rationale.
 
+### Operational note: host agent-tooling that writes into the working directory
+
+Some Claude Code installs run **session hooks** (e.g. the `claude-flow` add-on) that write
+telemetry/scratch files into the **current working directory** every time the `claude`
+binary runs — directories like `.claude-flow/`, `.swarm/`, `.hive-mind/`. When `claude` is
+your worker, those writes land in your target repo's working tree and the deterministic
+verifier **correctly** flags them as out-of-scope (`changed files outside allowedPaths`),
+blocking the slice and refusing to commit. This is the scope policy working as designed —
+not a bug — but it will stall real runs until you tell git to ignore that scratch. Exclude
+it the same way agent-loop excludes its own `.agent-loop/` state:
+
+```bash
+printf '.claude-flow/\n.swarm/\n.hive-mind/\n' >> .git/info/exclude   # or add to .gitignore
+```
+
+git-ignored files don't appear in `git status --porcelain --untracked-files=all`, so the
+verifier's changed-path set then contains only the agent's real edits. (Codex writes to
+`~/.codex`, not the repo, so it isn't affected.) This was observed first-hand in
+[../reports/live-real-provider-smoke.md](../reports/live-real-provider-smoke.md).
+
+> **Cost capture caveat.** `claude -p` / `codex exec` emit human text, not a machine-parseable
+> cost line, so `CommandProvider` records `costUsd:0 / tokens:0` even though real tokens are
+> spent — `execution.budgetUsd`/`budgetTokens` therefore cannot enforce a ceiling for these
+> text CLIs. Bound spend structurally instead (small tasks, `concurrency:1`, low
+> `maxRetriesPerSlice`, `agentTimeoutMs`).
+
 ## Routing
 
 The `Router` (`routing.ts`) maps roles → provider+model per slice/attempt, pure over

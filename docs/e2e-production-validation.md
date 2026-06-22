@@ -190,8 +190,8 @@ npm audit --omit=dev && npm pack --dry-run
 | Browser verification | **PASS (live)** | real headless Chrome via CDP |
 | GitHub PR flow | **PASS (live)** | real throwaway repo, created + deduped + cleaned up |
 | Crash recovery | **PASS (live)** | 16 real fault injections |
-| Multi-provider routing | **PARTIAL** | hermetic stubs prove exact provider/model/parallel/fallback/consensus; not run with real models |
-| Real AI-provider autonomous run | **PARTIAL — not proven live** | `claude`/`codex` CLIs are installed; a live run was **deliberately not executed** to avoid spending the user's API tokens and running an unsupervised paid agent |
+| Multi-provider routing | **PARTIAL** | hermetic stubs prove exact provider/model/parallel/fallback/consensus; not run with real models in a single run |
+| Real AI-provider autonomous run | **PASS (live)** | **proven live for two providers** (`claude-sonnet-4-6` and `codex`), each driving one slice end-to-end on a disposable repo: real process → real edits → deterministic verify → verified-first scoped commit → `COMPLETED`. See [../reports/live-real-provider-smoke.md](../reports/live-real-provider-smoke.md). |
 
 ## 9. Classification
 
@@ -208,6 +208,16 @@ Using the task's standard:
 > Caveat: the as-received `release-candidate-hardening` branch was **not** RC-clean —
 > it shipped an RCE (git hooks) and a dead security config (`riskPolicy`). The RC
 > verdict applies to `e2e-production-validation` (this branch) only.
+
+> **Update (2026-06-22, branch `live-real-provider-smoke`).** The one outstanding
+> `PARTIAL` — *real AI-provider autonomous execution* — has since been **proven live**
+> for two providers (Claude Code `2.1.172` and codex-cli `0.141.0`), each driving a slice
+> end-to-end on a disposable repo with a verified-first scoped commit, independently
+> re-validated by three adversarial skeptics (40/40 criteria met). This promotes the
+> product to **LIMITED PRODUCTION WITH MANDATORY HUMAN REVIEW** (still not full
+> production-ready: multi-provider *routing* in a single run remains hermetic-only, and
+> only a small low-risk task was driven live). Full evidence:
+> [../reports/live-real-provider-smoke.md](../reports/live-real-provider-smoke.md).
 
 ## 10. Recommendation
 

@@ -130,6 +130,12 @@ projections of it.
 agent-loop is a **release candidate** (`0.2.0-rc`). It is **not** marketed as
 "production-ready" in the unqualified sense — but the deterministic core and the
 operational/safety hardening below are implemented, tested, and honestly bounded.
+Real-provider autonomous execution has been **live-proven for two providers** (Claude Code
+and Codex) end-to-end on disposable repos — see
+[reports/live-real-provider-smoke.md](reports/live-real-provider-smoke.md) — putting the
+honest standing at **limited production with mandatory per-PR human review** (not full
+production-ready: multi-provider *routing within a single run* is still proven only
+hermetically).
 
 **Implemented and tested** (`npm run check`):
 
@@ -154,7 +160,9 @@ operational/safety hardening below are implemented, tested, and honestly bounded
   no secret persists in SQLite, JSON, logs, reports, or TUI snapshots.
 - **Real-provider smoke harness** (`test/integration/provider-smoke.test.ts`): hermetic
   argv stubs prove command/model construction for claude/codex/opencode; opt-in env-gated
-  tests probe the real CLIs. See [docs/provider-adapters.md](docs/provider-adapters.md).
+  tests probe the real CLIs. **Live-proven** end-to-end for Claude Code + Codex on
+  disposable repos ([reports/live-real-provider-smoke.md](reports/live-real-provider-smoke.md)).
+  See [docs/provider-adapters.md](docs/provider-adapters.md).
 - **GitHub live-safe validation**: hermetic `gh`-stub tests prove draft-by-default, push
   only with `--push`, dedupe, and **no auto-merge/auto-deploy path**; an optional live
   test runs against a throwaway repo. See [docs/github-integration.md](docs/github-integration.md).
@@ -180,8 +188,15 @@ operational/safety hardening below are implemented, tested, and honestly bounded
 - **Platform support is macOS/Linux.** Windows is **untested and unsupported** (shell-free
   spawn cannot launch `.cmd`/`.bat` shims; `taskkill`-based tree reaping is implemented
   but unexercised in CI). CI gates on Linux + macOS; a Windows job runs non-blocking.
-- **Real multi-provider runs are proven hermetically, not at scale.** Live paid
-  `claude`/`codex`/`opencode` runs are opt-in and not in CI.
+- **Real multi-provider runs are proven hermetically, not at scale.** Single-provider
+  live runs are proven for Claude Code and Codex (one slice each, disposable repo); but
+  multi-provider *routing within one run* (live fallback / round-robin / reviewer
+  consensus against real models), larger/multi-slice plans, and higher-risk slices are
+  not yet exercised live. Live paid runs are opt-in and not in CI.
+- **Host agent-tooling that writes into the working directory** (e.g. `claude-flow`
+  session hooks creating `.claude-flow/` in CWD) will be flagged out-of-scope by the
+  verifier and block a real `claude` run until you git-ignore that scratch — see the
+  operational note in [docs/provider-adapters.md](docs/provider-adapters.md).
 - **Browser verification with `concurrency > 1`** assumes per-slice ports (the harness
   binds one `baseUrl`); use `concurrency: 1` when enabling it.
 - **Threat model.** agent-loop verifies what *it* commits and rejects agent self-commits

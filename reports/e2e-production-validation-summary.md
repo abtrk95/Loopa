@@ -8,6 +8,10 @@
 
 > ## RELEASE CANDIDATE  (post-fix)
 > **Production ready: NO.**
+>
+> **Update (2026-06-22):** real-provider live execution has since been proven for two
+> providers — see `reports/live-real-provider-smoke.md`. Current standing:
+> **LIMITED PRODUCTION WITH MANDATORY HUMAN REVIEW** (not full production-ready).
 
 The deterministic harness is strong and, for **browser** and **GitHub**, live-proven.
 The as-received branch contained real defects — including a **remote-code-execution
@@ -46,7 +50,7 @@ is proven only hermetically; a live paid run was deliberately not executed.
 | GitHub PR | draft/dedupe/push/no-merge | `pr create [--push]` | draft, no auto-merge | ✓ **live throwaway repo** | PASS | `…/github` | none |
 | Docs accuracy | claims vs source | run each | accurate, honest | 5 overclaims fixed | BROKEN→FIXED | `…/docs-accuracy` | none |
 | Prod simulation | realistic app | `plan --idea`+`run --auto` | scoped commit, app works | COMPLETED, app passes 9 tests | PASS | `…/prod-sim` | none |
-| Real AI-provider live | claude/codex worker | `run --auto` | live commit | not run (token cost) | PARTIAL | doctor (CLIs present) | unproven live |
+| Real AI-provider live | claude/codex worker | `run --auto` | live commit | COMPLETED, scoped verified commit (×2 providers) | **PASS (live)** | `reports/live-real-provider-smoke.md` | multi-provider routing in one run still hermetic; tiny task only |
 
 ## 3. All commands run
 
@@ -90,10 +94,11 @@ Full list with severities → `docs/e2e-production-validation.md` §4.
 
 ## 7. Status of the high-value live paths
 
-- **Real-provider (claude/codex/opencode) live execution:** **PARTIAL — not proven
-  live.** CLIs installed (`codex-cli 0.141.0`, `Claude Code 2.1.172`); exact
-  command/model/parallel/fallback/consensus construction proven hermetically. A live
-  paid run was deliberately **not** executed to avoid spending the user's tokens.
+- **Real-provider (claude/codex/opencode) live execution:** **PASS (live), 2026-06-22.**
+  Proven end-to-end for two providers (`Claude Code 2.1.172` + `codex-cli 0.141.0`), each
+  driving one slice on a disposable repo to a verified-first scoped commit and `COMPLETED`.
+  Full evidence + reproduce steps: `reports/live-real-provider-smoke.md`. (Multi-provider
+  *routing within a single run* remains hermetic-only; exact construction proven by stubs.)
 - **Browser verification:** **PASS (live)** — real headless Chrome via CDP.
 - **GitHub integration:** **PASS (live)** — real throwaway repo, draft PR, dedupe,
   cleanup; `gh` authenticated.
