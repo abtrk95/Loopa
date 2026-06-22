@@ -90,6 +90,11 @@
 | schema validation (PO summary) | `ProductOwnerSummarySchema` | rejects bad mergeRecommendation | PASS (hermetic) | pr-review.test |
 | secret redaction in report | `redactor.redact(report)` | known secret masked | PASS (hermetic) | pr-review.test |
 | triage bullet-list AC | `github triage` | `## Acceptance criteria` bullets count | PASS (live: #10 too-risky→ready) + regression test | github-triage.test |
+| disabled scan not overclaimed | tri-state guard | `detectSecrets:false` → ⚠️ NOT CHECKED, never PASS | PASS (hermetic, adversarial-audit regression) | pr-review.test |
+| skipped check not overclaimed | `allowedCommands` skip | skipped → not-run, never PASS | PASS (hermetic) | pr-review.test |
+| PR body never more optimistic than report | body from full events | identical verdict/risk to report | PASS (live PR #11 body==report) + hermetic | pr-review.test |
+| branch/PR mismatch downgrades | `pr review --pr` head≠branch | never SAFE; concern | PASS (hermetic) | pr-review.test |
+| adversarial audit | 4-lens workflow, verified | overclaim/consistency holes found→fixed | PASS (18 agents; all confirmed→regression tests) | production-workflow-readiness.md |
 
 ## Verification / Safety (controlled fixtures — all PASS, Phase 10)
 | Control | Status | Evidence |

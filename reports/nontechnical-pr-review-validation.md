@@ -54,10 +54,22 @@ with the deterministic verifier remaining the sole completion authority.
 1. **Triage missed bullet-list acceptance criteria.** Only `- [ ]` checkboxes counted; a `## Acceptance criteria` bullet list did not. Combined with the conservative high-risk heuristic (the issue named `.env`/`secrets`/`production` as *do-not-touch* notes), a well-specified issue (#10) was mislabeled **too-risky**. Fixed with `issueAcceptanceCriteria()` (recognizes bullets under an AC-style heading). Live re-verify: #10 **too-risky → ready**. Regression test added.
 2. **PR-body risk could be more optimistic than the report.** The draft-PR body’s human-review section was built from the snapshot alone (no slice risk), so it read **SAFE TO REVIEW** while the full `pr review` report (which loads the plan) read **NEEDS HUMAN DEV REVIEW**. Fixed by threading the plan into the PR body so both surfaces report the **same** risk/verdict. Live re-verify: PR #11 body now **NEEDS HUMAN DEV REVIEW / High**.
 
-## Tests added: 27
+## Tests added: 33
 
-- `test/integration/pr-review.test.ts` — **26 tests**: verdict precedence (verifier authority; reviewer cannot override; secret/forbidden → BLOCKED; required-browser → BLOCKED; advisory-browser/high-risk → NEEDS HUMAN DEV REVIEW; no-local-run never SAFE), report-field generation, manual-checklist, risk classification, file grouping, secret redaction, screenshot references, product-owner schema, and `GhClient.viewPr`/`commentPr` dry-run-vs-apply via a `gh` stub.
+- `test/integration/pr-review.test.ts` — **32 tests**: verdict precedence (verifier authority; reviewer cannot override; secret/forbidden → BLOCKED; required-browser → BLOCKED; advisory-browser/high-risk → NEEDS HUMAN DEV REVIEW; no-local-run never SAFE), report-field generation, manual-checklist, risk classification, file grouping, secret redaction, screenshot references, product-owner schema, `GhClient.viewPr`/`commentPr` dry-run-vs-apply via a `gh` stub, **plus 6 adversarial-audit regressions** (disabled-scan → NOT CHECKED; skipped check → not-PASS; branch mismatch → never SAFE; UI-no-browser → flagged).
 - `test/integration/github-triage.test.ts` — **+1**: bullet-list acceptance-criteria regression.
+
+## Adversarial audit (extra confidence pass)
+
+A 4-lens adversarial workflow (18 agents, ~1.3M tokens) probed the verdict logic for
+under-blocking, overclaim, secret-leak, and inconsistency; each candidate finding was
+independently verified before acceptance. It confirmed a real **overclaim cluster** that
+is now fixed (see the readiness report): a config-**disabled** safety scan (e.g.
+`detectSecrets:false`) emits no event and was being shown as ✅ PASS; `allowedCommands`-
+**skipped** checks were shown as PASS; the PR body could read more optimistically than the
+report; a PR/branch mismatch only warned. All are fixed with regression tests, and the
+fixes were re-verified live against PR #11 (all guards still PASS with real events — the
+hardening only triggers when a scan genuinely did not run).
 
 ## Honest limitations of the report
 
