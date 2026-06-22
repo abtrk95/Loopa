@@ -41,12 +41,9 @@ function splitRepo(repo: string): { owner: string; name: string } {
   return { owner, name };
 }
 
-function sanitizeFieldName(name: string): string {
-  return name.replace(/["\\]/g, '');
-}
-
 /** Detect a linked Projects-v2 board + its status field. Returns undefined when
- * none is configured/available (never throws). */
+ * none is configured/available (never throws). The status-field name is passed as a
+ * GraphQL VARIABLE (never interpolated) so a config value cannot alter the query. */
 export async function detectProject(client: GhClient, repo: string, cfg: GithubConfig): Promise<ProjectInfo | undefined> {
   let owner: string, name: string;
   try {
@@ -54,11 +51,10 @@ export async function detectProject(client: GhClient, repo: string, cfg: GithubC
   } catch {
     return undefined;
   }
-  const field = sanitizeFieldName(cfg.project.statusField);
-  const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){projectsV2(first:20){nodes{id title number field(name:"${field}"){... on ProjectV2SingleSelectField{id options{id name}}}}}}}`;
+  const query = `query($owner:String!,$name:String!,$field:String!){repository(owner:$owner,name:$name){projectsV2(first:20){nodes{id title number field(name:$field){... on ProjectV2SingleSelectField{id options{id name}}}}}}}`;
   let data: unknown;
   try {
-    data = await client.graphql(query, { owner, name });
+    data = await client.graphql(query, { owner, name, field: cfg.project.statusField });
   } catch {
     return undefined;
   }

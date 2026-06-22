@@ -158,6 +158,31 @@ describe('interview — apply to objective (strengthen-only)', () => {
     expect(assertValidPlan(plan).ok).toBe(true);
   });
 
+  it('a declared LOW risk cannot lower the heuristic on a high-risk goal', async () => {
+    // A user (or crafted --answers) tagging an auth/payment goal "low" must NOT
+    // produce a low-risk slice — the heuristic floor still applies.
+    const base = baseFor('Implement authentication with password and payment');
+    const outcome = await conductInterview('standard', { base, detectedChecks: ['test'], auto: true, interactive: false }, undefined, {
+      risk: 'low',
+      acceptanceCriteria: ['login works'],
+      verificationCommands: ['npm test'],
+    });
+    const applied = applyInterview(base, outcome);
+    const plan = buildPlan(applied.objective, applied.stories, {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      branch: 'agent-loop/auth',
+      ...(applied.riskFloor ? { riskFloor: applied.riskFloor } : {}),
+    });
+    expect(plan.slices[0]!.risk).toBe('high'); // heuristic high, NOT lowered to low
+  });
+
+  it('blocks a high-risk goal even when the user declares risk=low (auto, no verification)', async () => {
+    const base = baseFor('Implement authentication with password and payment');
+    await expect(
+      conductInterview('quick', { base, detectedChecks: [], auto: true, interactive: false }, undefined, { risk: 'low' }),
+    ).rejects.toBeInstanceOf(IntakeError);
+  });
+
   it('never removes a built-in forbidden path (cannot widen scope into secrets)', async () => {
     const base = baseFor('Add a small util');
     // Even with an empty forbidden answer, built-ins remain.

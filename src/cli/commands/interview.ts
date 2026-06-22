@@ -40,7 +40,9 @@ export function interviewRequested(args: ParsedArgs): boolean {
   return flagBool(args, 'interview');
 }
 
-/** Load preset answers from a JSON file (--answers), picking only known keys. */
+/** Load preset answers from a JSON file (--answers), coercing each known key to its
+ * expected type so a malformed file degrades gracefully instead of crashing. Unknown
+ * keys and ill-typed values are dropped. */
 function loadPresetAnswers(path: string): InterviewAnswers {
   let raw: unknown;
   try {
@@ -51,7 +53,33 @@ function loadPresetAnswers(path: string): InterviewAnswers {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new IntakeError(`--answers file '${path}' must be a JSON object of interview answers`);
   }
-  return raw as InterviewAnswers;
+  return coerceAnswers(raw as Record<string, unknown>);
+}
+
+const LIST_KEYS = ['successCriteria', 'acceptanceCriteria', 'nonGoals', 'constraints', 'forbiddenPaths', 'verificationCommands', 'humanCheckpoints', 'stopConditions'] as const;
+const TEXT_KEYS = ['goal', 'background', 'userVisibleBehavior', 'architecture', 'mergePolicy'] as const;
+const BOOL_KEYS = ['browserVerification', 'githubIntegration', 'autonomous'] as const;
+
+function toList(v: unknown): string[] | undefined {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string').map((s) => s.trim()).filter(Boolean);
+  if (typeof v === 'string') return v.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
+  return undefined;
+}
+
+function coerceAnswers(raw: Record<string, unknown>): InterviewAnswers {
+  const out: InterviewAnswers = {};
+  for (const k of LIST_KEYS) {
+    const list = toList(raw[k]);
+    if (list && list.length) (out[k] as string[]) = list;
+  }
+  for (const k of TEXT_KEYS) {
+    if (typeof raw[k] === 'string' && raw[k]) (out[k] as string) = raw[k] as string;
+  }
+  for (const k of BOOL_KEYS) {
+    if (typeof raw[k] === 'boolean') (out[k] as boolean) = raw[k] as boolean;
+  }
+  if (raw['risk'] === 'low' || raw['risk'] === 'medium' || raw['risk'] === 'high') out.risk = raw['risk'];
+  return out;
 }
 
 /**

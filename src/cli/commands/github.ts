@@ -186,48 +186,49 @@ async function githubRunIssue(session: Session, args: ParsedArgs): Promise<numbe
   const meta = loadRunMeta(session.paths);
   if (!meta) throw new ControlError('no run metadata after planning; aborting.');
 
-  // Track issue labels so status updates are precise (no removing absent labels).
-  const issue = await client.viewIssue(repo, issueNum);
-  const labelSet = new Set(issue.labels);
-  await setRunStatus(client, cfg, repo, issueNum, labelSet, 'RUNNING', syncProject, warnings);
-
-  // Run the local deterministic engine under the single-writer lock.
+  // Acquire the single-writer run lock BEFORE any GitHub writes so a concurrent run
+  // cannot race the label/board updates for this issue.
   const lock = acquireRunLock(session.paths.runLock, meta.runId, Date.now());
   if (!lock.ok) throw new ControlError(`another agent-loop run is active (pid ${lock.holder.pid}).`);
   let finalState: RunState;
   let reportPath: string;
   try {
+    // Track issue labels so status updates are precise (no removing absent labels).
+    const issue = await client.viewIssue(repo, issueNum);
+    const labelSet = new Set(issue.labels);
+    await setRunStatus(client, cfg, repo, issueNum, labelSet, 'RUNNING', syncProject, warnings);
+
     const engine = new RunEngine(session, planned.plan, meta);
     const result = await engine.start();
     finalState = result.finalState;
     reportPath = result.reportPath;
+
+    await setRunStatus(client, cfg, repo, issueNum, labelSet, finalState, syncProject, warnings);
+
+    // Optional draft PR (explicit; never merges/deploys).
+    if (flagBool(args, 'pr')) {
+      const snap = projectEvents(session.store.read(meta.runId));
+      if (dryRun) {
+        process.stderr.write(`  [gh DRY-RUN] pr upsert: draft PR for ${meta.branch} (Refs #${issueNum})\n`);
+      } else {
+        const pr = await updatePullRequest(
+          {
+            root: session.root,
+            branch: meta.branch ?? snap.branch,
+            remote: flagStr(args, 'remote') ?? cfg.remote,
+            draft: !flagBool(args, 'no-draft') && cfg.draftPr,
+            push: flagBool(args, 'push'),
+            sourceIssue: issueNum,
+            ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
+          },
+          snap,
+          session.pm,
+        );
+        process.stdout.write(`${pr.created ? 'Created' : pr.updated ? 'Updated' : 'Existing'} draft PR: ${pr.url}\n`);
+      }
+    }
   } finally {
     releaseRunLock(session.paths.runLock);
-  }
-
-  await setRunStatus(client, cfg, repo, issueNum, labelSet, finalState, syncProject, warnings);
-
-  // Optional draft PR (explicit; never merges/deploys).
-  if (flagBool(args, 'pr')) {
-    const snap = projectEvents(session.store.read(meta.runId));
-    if (dryRun) {
-      process.stderr.write(`  [gh DRY-RUN] pr upsert: draft PR for ${meta.branch} (Refs #${issueNum})\n`);
-    } else {
-      const pr = await updatePullRequest(
-        {
-          root: session.root,
-          branch: meta.branch ?? snap.branch,
-          remote: flagStr(args, 'remote') ?? cfg.remote,
-          draft: !flagBool(args, 'no-draft') && cfg.draftPr,
-          push: flagBool(args, 'push'),
-          sourceIssue: issueNum,
-          ...(flagStr(args, 'base') ? { baseBranch: flagStr(args, 'base')! } : {}),
-        },
-        snap,
-        session.pm,
-      );
-      process.stdout.write(`${pr.created ? 'Created' : pr.updated ? 'Updated' : 'Existing'} draft PR: ${pr.url}\n`);
-    }
   }
 
   for (const w of warnings) process.stderr.write(`  warning: ${w}\n`);
@@ -252,6 +253,8 @@ async function setRunStatus(
     const runStatusLabels = [cfg.labels.planReady, cfg.labels.running, cfg.labels.blocked, cfg.labels.done, cfg.labels.error];
     const toRemove = runStatusLabels.filter((l) => l !== target && labelSet.has(l));
     if (!labelSet.has(target)) {
+      // Ensure the label exists (best-effort) so adding it can't fail on a fresh repo.
+      await client.ensureLabel(repo, target, 'ededed', 'agent-loop status');
       await client.addLabels(repo, issueNum, [target]);
       labelSet.add(target);
     }

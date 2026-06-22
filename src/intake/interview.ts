@@ -111,7 +111,6 @@ export const QUESTION_CATALOG: readonly QuestionSpec[] = [
   { key: 'stopConditions', prompt: 'Stop / blocker conditions (comma-separated)', type: 'list', from: 'strict' },
 ];
 
-const RISK_RANK: Record<Risk, number> = { low: 0, medium: 1, high: 2 };
 const HIGH_RISK_RE = /\b(auth|authentication|password|secret|payment|billing|crypto|security|migration|delete|drop|production|infra|deploy)\b/i;
 
 function modeIncludes(mode: InterviewMode, from: InterviewMode): boolean {
@@ -319,9 +318,11 @@ function enforceSafety(_mode: InterviewMode, ctx: InterviewContext, answers: Int
     throw new IntakeError('interview cannot proceed without a goal. Provide --idea/--prd or answer the goal question.');
   }
 
+  // A user declaring a LOW risk must never suppress the heuristic high-risk signal:
+  // the declared risk can only RAISE the effective risk, never lower it.
   const declaredRisk = answers.risk;
   const looksHighRisk = HIGH_RISK_RE.test(`${goal} ${ctx.base?.objective.background ?? ''}`);
-  const isHighRisk = declaredRisk === 'high' || (declaredRisk === undefined && looksHighRisk);
+  const isHighRisk = looksHighRisk || declaredRisk === 'high';
   const hasVerification = ctx.detectedChecks.length > 0 || (answers.verificationCommands?.length ?? 0) > 0;
 
   if (isHighRisk && !hasVerification) {
@@ -407,7 +408,10 @@ export function applyInterview(base: NormalizeResult, outcome: InterviewOutcome)
   }
 
   // Acceptance criteria for an idea (no stories): synthesize a single story so the
-  // slice carries them, rather than leaking into the generic conservative default.
+  // slice carries them. We deliberately do NOT set the story's risk from the answer —
+  // risk is applied as a FLOOR in buildPlan (maxRisk over the heuristic). That way a
+  // declared risk can only ever RAISE a slice's risk, never lower the heuristic (so a
+  // user can't tag a high-risk goal "low" to dodge risk-gated checks).
   if (stories.length === 0 && (a.acceptanceCriteria?.length ?? 0) > 0) {
     stories = [
       {
@@ -415,15 +419,13 @@ export function applyInterview(base: NormalizeResult, outcome: InterviewOutcome)
         description: [objective.goal, objective.background].filter(Boolean).join('\n\n') || objective.goal,
         acceptanceCriteria: a.acceptanceCriteria!,
         ...(a.forbiddenPaths?.length ? { forbiddenPaths: a.forbiddenPaths } : {}),
-        ...(a.risk ? { risk: a.risk } : {}),
       },
     ];
-  } else if (a.forbiddenPaths?.length || a.risk) {
-    // Existing stories: tighten forbidden paths and raise risk (never lower).
+  } else if (a.forbiddenPaths?.length) {
+    // Existing stories: only tighten forbidden paths; risk is raised via the floor.
     stories = stories.map((s) => ({
       ...s,
-      ...(a.forbiddenPaths?.length ? { forbiddenPaths: unique([...(s.forbiddenPaths ?? []), ...a.forbiddenPaths!]) } : {}),
-      ...(a.risk ? { risk: maxRisk(s.risk, a.risk) } : {}),
+      forbiddenPaths: unique([...(s.forbiddenPaths ?? []), ...a.forbiddenPaths!]),
     }));
   }
 
@@ -457,11 +459,6 @@ function splitList(raw: string): string[] {
 
 function unique(items: string[]): string[] {
   return [...new Set(items.filter((s) => s && s.trim()))];
-}
-
-function maxRisk(a: Risk | undefined, b: Risk): Risk {
-  if (!a) return b;
-  return RISK_RANK[a] >= RISK_RANK[b] ? a : b;
 }
 
 function commandKey(command: CheckSpec['command']): string {

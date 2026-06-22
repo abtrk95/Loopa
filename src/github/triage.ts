@@ -11,8 +11,14 @@ import type { GhClient, GhIssue } from './client.js';
 import type { GithubConfig } from '../config/config.js';
 import { clarificationPrompts, type InterviewMode } from '../intake/interview.js';
 import { heuristicRisk } from '../planner/plan.js';
-import { labelForTriage, triggerLabels, type TriageStatus } from './labels.js';
+import { labelForTriage, triggerLabels, LABEL_COLORS, type TriageStatus } from './labels.js';
+import { errorMessage } from '../domain/errors.js';
 import type { Risk } from '../domain/schemas.js';
+
+/** Best-effort label color from the label's suffix (e.g. agent-loop:ready → ready). */
+function labelColor(label: string): string {
+  return LABEL_COLORS[label.split(':').pop() ?? ''] ?? 'ededed';
+}
 
 export interface TriageResult {
   number: number;
@@ -137,7 +143,12 @@ export async function triageRepo(client: GhClient, cfg: GithubConfig, opts: Tria
     }
 
     const result = classifyIssue(issue, opts.mode);
-    await applyClassification(client, cfg, opts.repo, issue, result, { comment: opts.comment, classificationLabels });
+    // One issue's write failure must not crash the whole triage pass.
+    try {
+      await applyClassification(client, cfg, opts.repo, issue, result, { comment: opts.comment, classificationLabels });
+    } catch (err) {
+      result.reasons.push(`label/comment write failed: ${errorMessage(err)}`);
+    }
     results.push(result);
   }
 
@@ -162,6 +173,9 @@ export async function applyClassification(
   const toRemove = classificationLabels.filter((l) => l !== wantLabel && issue.labels.includes(l));
 
   if (!issue.labels.includes(wantLabel)) {
+    // Ensure the label exists on the repo first (best-effort) so adding it can't fail
+    // just because the configured label was never created.
+    await client.ensureLabel(repo, wantLabel, labelColor(wantLabel), 'agent-loop triage');
     await client.addLabels(repo, issue.number, [wantLabel]);
     result.labelsAdded = [wantLabel];
   }

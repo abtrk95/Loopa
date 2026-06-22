@@ -20,7 +20,7 @@ import type { GithubConfig } from '../config/config.js';
 import { classifyIssue, applyClassification, type TriageResult } from './triage.js';
 import { triggerLabels, projectStatusForTriage } from './labels.js';
 import { syncIssueStatus } from './project.js';
-import { ControlError } from '../domain/errors.js';
+import { ControlError, errorMessage } from '../domain/errors.js';
 import type { InterviewMode } from '../intake/interview.js';
 
 export interface WatchPaths {
@@ -108,20 +108,31 @@ export async function watchOnce(
       results.push(result);
       continue;
     }
-    await applyClassification(client, cfg, opts.repo, issue, result, { comment: opts.comment });
-    if (opts.syncProject) {
-      const sync = await syncIssueStatus(client, opts.repo, cfg, issue.number, projectStatusForTriage(result.status));
-      if (!sync.ok && sync.warning) warnings.push(`#${issue.number}: ${sync.warning}`);
+    try {
+      await applyClassification(client, cfg, opts.repo, issue, result, { comment: opts.comment });
+      if (opts.syncProject) {
+        const sync = await syncIssueStatus(client, opts.repo, cfg, issue.number, projectStatusForTriage(result.status));
+        if (!sync.ok && sync.warning) warnings.push(`#${issue.number}: ${sync.warning}`);
+      }
+      // Record processed state ONLY when we actually applied (not dry-run), so a
+      // dry-run preview never suppresses the real apply later.
+      if (!client.isDryRun) state.processed[key] = result.status;
+      appendLine(
+        eventsPath(paths),
+        JSON.stringify({ ts: now(), iteration, issue: issue.number, status: result.status, dryRun: client.isDryRun }),
+        { mode: PRIVATE_FILE_MODE },
+      );
+      processed++;
+    } catch (err) {
+      // A single issue's write failure must not crash the pass; log it and continue.
+      // State is NOT recorded, so the issue is retried on the next pass.
+      warnings.push(`#${issue.number}: ${errorMessage(err)}`);
+      appendLine(
+        eventsPath(paths),
+        JSON.stringify({ ts: now(), iteration, issue: issue.number, status: result.status, error: errorMessage(err), dryRun: client.isDryRun }),
+        { mode: PRIVATE_FILE_MODE },
+      );
     }
-    // Record processed state ONLY when we actually applied (not dry-run), so a
-    // dry-run preview never suppresses the real apply later.
-    if (!client.isDryRun) state.processed[key] = result.status;
-    appendLine(
-      eventsPath(paths),
-      JSON.stringify({ ts: now(), iteration, issue: issue.number, status: result.status, dryRun: client.isDryRun }),
-      { mode: PRIVATE_FILE_MODE },
-    );
-    processed++;
     results.push(result);
   }
 

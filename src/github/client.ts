@@ -114,10 +114,13 @@ export class GhClient {
 
   async removeLabels(repo: string, number: number, labels: string[]): Promise<void> {
     if (labels.length === 0) return;
+    // Best-effort: removing a label that isn't actually on the issue (state drift)
+    // must not crash a triage/watch pass.
     await this.write(
       ['issue', 'edit', String(number), '--repo', repo, '--remove-label', labels.join(',')],
       'remove-labels',
       `#${number} -= [${labels.join(', ')}]`,
+      { bestEffort: true },
     );
   }
 
