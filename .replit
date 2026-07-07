@@ -1,0 +1,5 @@
+run = "npm install && npm run replit"
+entrypoint = "scripts/replit-server.mjs"
+
+[nix]
+channel = "stable-24_05"
