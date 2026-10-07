@@ -1,0 +1,52 @@
+name: PHP 8.2.29 validation tools
+on:
+  push:
+    branches: [validation/php8229-tools-20261007]
+    paths: [.github/workflows/php8229-validation-tools.yml]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Build public dependencies only
+        run: |
+          mkdir -p "$PWD/out"
+          docker run --rm -v "$PWD/out:/out" debian:bookworm bash -euxo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential pkg-config libxml2-dev libssl-dev libcurl4-openssl-dev libzip-dev libonig-dev libpng-dev libjpeg-dev libfreetype-dev zlib1g-dev mariadb-server mariadb-client
+            mkdir -p /opt/native-tools/{php,bin,lib,share,downloads}
+            cd /tmp
+            curl -fL --retry 3 https://www.php.net/distributions/php-8.2.29.tar.xz -o php-8.2.29.tar.xz
+            cp php-8.2.29.tar.xz /opt/native-tools/downloads/
+            tar -xf php-8.2.29.tar.xz
+            cd php-8.2.29
+            ./configure --prefix=/opt/native-tools/php --disable-cgi --enable-cli --enable-mysqlnd --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd --without-sqlite3 --without-pdo-sqlite --with-openssl --with-curl --with-zlib --with-zip --enable-mbstring --enable-gd --with-jpeg --with-freetype --enable-pcntl --enable-exif
+            make -j2
+            make install
+            /opt/native-tools/php/bin/php -v
+            /opt/native-tools/php/bin/php -r "exit(PHP_VERSION === \"8.2.29\" ? 0 : 1);"
+            cp /usr/sbin/mariadbd /usr/bin/mariadb /usr/bin/mariadb-admin /usr/bin/mariadb-dump /usr/bin/mariadb-install-db /opt/native-tools/bin/
+            cp -a /usr/share/mysql /opt/native-tools/share/
+            find /opt/native-tools/php /opt/native-tools/bin -type f -executable -exec sh -c "ldd \"\$1\" || true" sh {} \; > /tmp/dependencies.txt 2>/dev/null
+            awk "/=> \\/|^\\// {for(i=1;i<=NF;i++) if(\$i ~ /^\\//) print \$i}" /tmp/dependencies.txt | sort -u | xargs -r -I{} cp -L {} /opt/native-tools/lib/
+            cp -a /usr/lib/mysql /opt/native-tools/ 2>/dev/null || true
+            cd /opt/native-tools/downloads
+            curl -fL --retry 3 https://wordpress.org/latest.tar.gz -o wordpress-latest.tar.gz
+            curl -fL --retry 3 https://wordpress.org/wordpress-6.7.tar.gz -o wordpress-6.7.tar.gz
+            curl -fL --retry 3 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o wp-cli.phar
+            sha256sum * > SHA256SUMS
+            dpkg-query -W > /opt/native-tools/debian-packages.txt
+            /opt/native-tools/php/bin/php -i > /opt/native-tools/php-build.txt
+            tar -C /opt -cJf /out/native-tools.tar.xz native-tools
+            sha256sum /out/native-tools.tar.xz > /out/native-tools.sha256
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: php8229-native-tools
+          path: out/*
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
