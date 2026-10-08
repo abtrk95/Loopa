@@ -1,2 +1,0 @@
-{"phase":"start","name":"w_oos","role":"worker","sliceId":"S-001","attempt":1,"model":null,"argv":[],"pid":95072,"cwd":"/private/tmp/mp-G1","startIso":"2026-06-21T21:14:01.260Z","nowIso":"2026-06-21T21:14:01.260Z","nowNs":225953084054041}
-{"phase":"end","name":"w_oos","role":"worker","sliceId":"S-001","attempt":1,"model":null,"argv":[],"pid":95072,"cwd":"/private/tmp/mp-G1","startIso":"2026-06-21T21:14:01.260Z","nowIso":"2026-06-21T21:14:01.863Z","nowNs":225953686757166,"kind":"edit","wrote":"OUTSIDE_SCOPE_w_oos.txt"}

@@ -1,9 +1,0 @@
-Goal: Add a small health check utility with tests
-Slices: 1
-
-  S-001  [low] Implement: Add a small health check utility with tests
-        paths: **
-        checks: test
-
-Plan written to /var/folders/_y/xz_hf1sn2cn0jqxl7fqg4p3h0000gn/T/al-fakeflow-1071/.agent-loop/plan.json
-Run it with: agent-loop run --auto
