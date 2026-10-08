@@ -54,7 +54,7 @@ jobs:
           sha256sum native-runtime.tar.gz wordpress-*.tar.gz wp-cli.phar > SHA256SUMS
           SCRIPT
       - name: Retain public validation dependencies
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-php-8.2.29-wordpress
           path: bundle/
