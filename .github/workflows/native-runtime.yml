@@ -1,60 +1,50 @@
-name: Public PHP native validation dependencies
+name: Isolated native PHP compatibility dependencies
 on:
   push:
-    branches:
-      - validation/php-8.2.29-20261008
-    paths:
-      - .github/workflows/native-runtime.yml
+    branches: [validation/php-8.2.29-20261008]
+    paths: [.github/workflows/native-runtime.yml]
 permissions:
   contents: read
 jobs:
   runtime:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
-      - name: Build disposable PHP 8.2.29 runtime
+      - name: Compile exact PHP and retain native dependencies
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$PWD/bundle"
-          docker pull php:8.2.29-cli-bookworm
-          docker image inspect php:8.2.29-cli-bookworm --format '{{json .RepoDigests}}' > bundle/image-provenance.json
-          docker run --interactive --rm -v "$PWD/bundle:/out" php:8.2.29-cli-bookworm bash -s <<'SCRIPT'
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq
-          apt-get install -y --no-install-recommends mariadb-server libzip-dev libffi-dev ca-certificates curl xz-utils
-          docker-php-ext-install -j2 mysqli zip ffi
-          r=/out/runtime
-          mkdir -p "$r/bin" "$r/sbin" "$r/lib/mysql" "$r/ext" "$r/share"
-          cp -L /usr/local/bin/php "$r/bin/php"
-          cp -L /usr/sbin/mariadbd "$r/sbin/mariadbd"
-          for b in mariadb mariadb-admin mariadb-dump mariadb-install-db my_print_defaults resolveip; do
-            test ! -f "/usr/bin/$b" || cp -L "/usr/bin/$b" "$r/bin/$b"
-          done
-          cp -a /usr/share/mysql "$r/share/mysql"
-          cp -a /usr/lib/mysql/plugin "$r/lib/mysql/plugin"
-          cp /usr/local/lib/php/extensions/*/mysqli.so "$r/ext/"
-          cp /usr/local/lib/php/extensions/*/zip.so "$r/ext/"
-          cp /usr/local/lib/php/extensions/*/ffi.so "$r/ext/"
-          find "$r/bin" "$r/sbin" "$r/ext" "$r/lib/mysql/plugin" -type f -print0 | while IFS= read -r -d '' f; do
+          mkdir -p bundle/native/{bin,sbin,lib,share}
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential autoconf pkg-config libxml2-dev libssl-dev libzip-dev libffi-dev zlib1g-dev libcurl4-openssl-dev libonig-dev mariadb-server
+          curl -fL --retry 2 https://www.php.net/distributions/php-8.2.29.tar.xz -o php.tar.xz
+          echo '475f991afd2d5b901fb410be407d929bc00c46285d3f439a02c59e8b6fe3589c  php.tar.xz' | sha256sum -c -
+          tar -xf php.tar.xz
+          cd php-8.2.29
+          ./configure --prefix=/tmp/tl-php --enable-cli --disable-cgi --without-pear --with-mysqli=mysqlnd --enable-mysqlnd --with-openssl --with-zlib --with-ffi --with-zip --with-curl --enable-mbstring --enable-pcntl > ../configure.log
+          make -j2 > ../make.log
+          make install >> ../make.log
+          cd ..
+          cp /tmp/tl-php/bin/php bundle/native/bin/
+          cp /usr/sbin/mariadbd bundle/native/sbin/
+          for x in mariadb mariadb-admin mariadb-dump mariadb-install-db my_print_defaults resolveip; do test ! -f "/usr/bin/$x" || cp "/usr/bin/$x" bundle/native/bin/; done
+          cp -a /usr/share/mysql bundle/native/share/
+          cp -a /usr/lib/mysql bundle/native/lib/
+          find bundle/native -type f -print0 | while IFS= read -r -d '' f; do
             (ldd "$f" 2>/dev/null || true) | awk '{for(i=1;i<=NF;i++) if($i ~ /^\//) print $i}' | while read -r dep; do
               case "$(basename "$dep")" in libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|ld-linux*) continue ;; esac
-              cp -L -n "$dep" "$r/lib/" || true
+              cp -L -n "$dep" bundle/native/lib/ || true
             done
           done
-          php -r 'if(PHP_VERSION !== "8.2.29" || !extension_loaded("mysqli")) exit(1);'
-          { php -v; php -m; mariadbd --version; } > /out/runtime-provenance.txt
-          tar -C /out -czf /out/native-runtime.tar.gz runtime
-          rm -rf "$r"
-          curl -fL --retry 3 https://wordpress.org/wordpress-6.8.3.tar.gz -o /out/wordpress-6.8.3.tar.gz
-          curl -fL --retry 3 https://wordpress.org/wordpress-6.7.tar.gz -o /out/wordpress-6.7.tar.gz
-          curl -fL --retry 3 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /out/wp-cli.phar
-          cd /out
-          sha256sum native-runtime.tar.gz wordpress-*.tar.gz wp-cli.phar > SHA256SUMS
-          SCRIPT
-      - name: Retain public validation dependencies
-        uses: actions/upload-artifact@v7
+          bundle/native/bin/php -n -r 'if(PHP_VERSION!=="8.2.29"||!extension_loaded("mysqli"))exit(1);'
+          { bundle/native/bin/php -n -v; bundle/native/bin/php -n -m; mariadbd --version; } > bundle/provenance.txt
+          tar -C bundle -czf bundle/native-runtime.tar.gz native
+          rm -rf bundle/native
+          curl -fL --retry 2 https://wordpress.org/wordpress-6.8.3.tar.gz -o bundle/wordpress-6.8.3.tar.gz
+          curl -fL --retry 2 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o bundle/wp-cli.phar
+          cd bundle
+          sha256sum *.gz *.phar > SHA256SUMS
+      - uses: actions/upload-artifact@v7
         with:
           name: native-php-8.2.29-wordpress
           path: bundle/
