@@ -1,1 +1,0 @@
-error [git]: working tree has 1 uncommitted change(s). Commit/stash them, or set git.allowDirty: true to override.

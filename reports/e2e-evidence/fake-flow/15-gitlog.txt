@@ -1,3 +1,0 @@
-eac9acd S-001 Implement: Add a small health check utility with tests
-ffbdcb8 chore: add .agent-loop config
-9368801 baseline

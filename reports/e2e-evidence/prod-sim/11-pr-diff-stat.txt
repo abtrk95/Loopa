@@ -1,4 +1,0 @@
- README.md            | 10 ++++++++++
- src/billing.js       | 34 ++++++++++++++++++++++++++++++++++
- test/billing.test.js | 39 +++++++++++++++++++++++++++++++++++++++
- 3 files changed, 83 insertions(+)

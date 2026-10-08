@@ -1,4 +1,0 @@
-#!/bin/sh
-export STUB_NAME="r_block"
-export STUB_REVIEW_VERDICT="blocked"
-exec node "/Users/abtrk/Dev/loop/agent-loop/reports/e2e-evidence/multi-provider/stubs/stub.mjs" "$@"

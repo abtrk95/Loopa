@@ -1,7 +1,0 @@
-Author: agent-loop <agent-loop@local>
-Committer: agent-loop <agent-loop@local>
----body---
-S-001 Implement: Add a small billing settings page with validation, tests, and docume…
-
-agent-loop-slice: S-001
-

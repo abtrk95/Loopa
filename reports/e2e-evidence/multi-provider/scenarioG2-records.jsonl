@@ -1,2 +1,0 @@
-{"phase":"start","name":"w_secret","role":"worker","sliceId":"S-001","attempt":1,"model":null,"argv":[],"pid":95715,"cwd":"/private/tmp/mp-G2","startIso":"2026-06-21T21:14:02.608Z","nowIso":"2026-06-21T21:14:02.609Z","nowNs":225954432770333}
-{"phase":"end","name":"w_secret","role":"worker","sliceId":"S-001","attempt":1,"model":null,"argv":[],"pid":95715,"cwd":"/private/tmp/mp-G2","startIso":"2026-06-21T21:14:02.608Z","nowIso":"2026-06-21T21:14:03.209Z","nowNs":225955032935791,"kind":"edit","wrote":"slice_S001/leak.txt"}
